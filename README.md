@@ -20,7 +20,7 @@ Kanban board ready!
 - **Live reload** - Watches `tasks.db` for changes, auto-regenerates HTML
 - **Self-contained HTML** - No external assets, works offline
 - **Machine-readable output** - JSON mode for scripting and CI/CD
-- **Works from any subdirectory** - Finds `.claude/` by walking up
+- **Works from any subdirectory** - Finds `.ohno/` by walking up
 
 ## Installation
 
@@ -39,8 +39,8 @@ kanban serve
 
 ### Option 3: Copy to project
 ```bash
-cp kanban.py .claude/
-python .claude/kanban.py serve
+cp kanban.py .ohno/
+python .ohno/kanban.py serve
 ```
 
 ## Quick Start
@@ -120,16 +120,16 @@ Stories
 
 ### `kanban init`
 
-Initialize `.claude/` folder structure.
+Initialize `.ohno/` folder structure.
 
 ```bash
-kanban init                     # Create .claude/ folder
+kanban init                     # Create .ohno/ folder
 kanban init --force             # Overwrite existing
 ```
 
 Creates:
 ```
-.claude/
+.ohno/
 ├── sessions/
 ├── checkpoints/
 └── kanban.html
@@ -177,7 +177,7 @@ Task statuses: `todo`, `in_progress`, `review`, `done`, `blocked`
 | 0 | Success |
 | 1 | General error |
 | 2 | Usage error |
-| 3 | Configuration error (.claude/ not found) |
+| 3 | Configuration error (.ohno/ not found) |
 | 4 | Database error (tasks.db not found/corrupted) |
 | 5 | Network error (port in use) |
 

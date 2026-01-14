@@ -8,7 +8,7 @@ Usage:
     kanban serve [--port 3333]    # HTTP server + watch + auto-sync
     kanban sync                   # One-time sync
     kanban status                 # Show project stats
-    kanban init                   # Initialize .claude/ folder
+    kanban init                   # Initialize .ohno/ folder
 
 The tool watches tasks.db for changes and automatically regenerates kanban.html.
 Skills and manual sqlite3 commands don't need to know about syncing - just modify
@@ -33,7 +33,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 # ============================================================================
 # Exit Codes (following sysexits.h conventions)
@@ -53,7 +53,7 @@ EXIT_NETWORK = 5
 DEFAULT_PORT = 3333
 DEFAULT_HOST = "127.0.0.1"  # Security: localhost only by default
 WATCH_INTERVAL = 1.0
-CLAUDE_DIR = ".claude"
+OHNO_DIR = ".ohno"
 DB_NAME = "tasks.db"
 HTML_NAME = "kanban.html"
 
@@ -186,14 +186,14 @@ out = Output()
 
 
 def find_claude_dir(override_dir: Optional[str] = None) -> Path:
-    """Find .claude directory, with optional override."""
+    """Find .ohno directory, with optional override."""
     # Priority 1: Explicit override
     if override_dir:
         path = Path(override_dir)
         if path.exists():
             return path
         # Maybe they specified the parent directory
-        claude_path = path / CLAUDE_DIR
+        claude_path = path / OHNO_DIR
         if claude_path.exists():
             return claude_path
         return path  # Return as-is, let caller handle missing
@@ -203,7 +203,7 @@ def find_claude_dir(override_dir: Optional[str] = None) -> Path:
         path = Path(ENV_DIR)
         if path.exists():
             return path
-        claude_path = path / CLAUDE_DIR
+        claude_path = path / OHNO_DIR
         if claude_path.exists():
             return claude_path
         return path
@@ -211,13 +211,13 @@ def find_claude_dir(override_dir: Optional[str] = None) -> Path:
     # Priority 3: Walk up from current directory
     current = Path.cwd()
     while current != current.parent:
-        claude_dir = current / CLAUDE_DIR
+        claude_dir = current / OHNO_DIR
         if claude_dir.exists():
             return claude_dir
         current = current.parent
 
     # Default to current directory's .claude
-    return Path.cwd() / CLAUDE_DIR
+    return Path.cwd() / OHNO_DIR
 
 
 def get_db_path(claude_dir: Path) -> Path:
@@ -247,10 +247,21 @@ def export_database(db_path: Path) -> Optional[dict]:
             "stories": [],
             "tasks": [],
             "dependencies": [],
+            "task_activity": [],
+            "task_files": [],
+            "task_dependencies": [],
         }
 
-        # Export each table
+        # Export core tables
         for table in ["projects", "epics", "stories", "tasks", "dependencies"]:
+            try:
+                cursor = conn.execute(f"SELECT * FROM {table}")
+                data[table] = [dict(row) for row in cursor.fetchall()]
+            except sqlite3.OperationalError:
+                pass  # Table doesn't exist yet
+
+        # Export extended tables (Phase 3 support)
+        for table in ["task_activity", "task_files", "task_dependencies"]:
             try:
                 cursor = conn.execute(f"SELECT * FROM {table}")
                 data[table] = [dict(row) for row in cursor.fetchall()]
@@ -281,6 +292,9 @@ def compute_stats(data: dict) -> dict:
     tasks = data.get("tasks", [])
     stories = data.get("stories", [])
     epics = data.get("epics", [])
+    activity = data.get("task_activity", [])
+    files = data.get("task_files", [])
+    dependencies = data.get("task_dependencies", [])
 
     total = len(tasks)
     done = len([t for t in tasks if t.get("status") == "done"])
@@ -288,6 +302,13 @@ def compute_stats(data: dict) -> dict:
     in_progress = len([t for t in tasks if t.get("status") == "in_progress"])
     review = len([t for t in tasks if t.get("status") == "review"])
     todo = total - done - blocked - in_progress - review
+
+    # Compute estimated vs actual hours
+    total_estimate = sum(t.get("estimate_hours") or 0 for t in tasks)
+    total_actual = sum(t.get("actual_hours") or 0 for t in tasks)
+
+    # Count tasks with descriptions/context
+    tasks_with_details = len([t for t in tasks if t.get("description") or t.get("context_summary")])
 
     return {
         "total_tasks": total,
@@ -302,6 +323,13 @@ def compute_stats(data: dict) -> dict:
         "total_epics": len(epics),
         "p0_count": len([e for e in epics if e.get("priority") == "P0"]),
         "p1_count": len([e for e in epics if e.get("priority") == "P1"]),
+        # Extended stats
+        "total_estimate_hours": total_estimate,
+        "total_actual_hours": total_actual,
+        "tasks_with_details": tasks_with_details,
+        "total_activity": len(activity),
+        "total_files": len(files),
+        "total_dependencies": len(dependencies),
     }
 
 
@@ -596,10 +624,400 @@ KANBAN_HTML_TEMPLATE = '''<!DOCTYPE html>
             border-radius: 4px;
             font-size: 0.875rem;
         }
+
+        /* Detail Panel Slide-out */
+        .detail-backdrop {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.5);
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.2s, visibility 0.2s;
+            z-index: 200;
+        }
+
+        .detail-backdrop.open {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        .detail-panel {
+            position: fixed;
+            top: 0;
+            right: -600px;
+            width: 600px;
+            max-width: 100vw;
+            height: 100vh;
+            background: var(--bg-secondary);
+            border-left: 1px solid var(--border);
+            overflow-y: auto;
+            transition: right 0.3s ease-out;
+            z-index: 201;
+        }
+
+        .detail-panel.open {
+            right: 0;
+        }
+
+        .detail-header {
+            padding: 1.25rem;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            position: sticky;
+            top: 0;
+            background: var(--bg-secondary);
+            z-index: 1;
+        }
+
+        .detail-header-left {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .detail-id {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            font-family: monospace;
+            margin-bottom: 0.5rem;
+        }
+
+        .detail-title {
+            font-size: 1.125rem;
+            font-weight: 600;
+            line-height: 1.3;
+            margin-bottom: 0.75rem;
+        }
+
+        .detail-badges {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+
+        .detail-badge {
+            font-size: 0.7rem;
+            padding: 0.2rem 0.5rem;
+            border-radius: 4px;
+            font-weight: 500;
+        }
+
+        .detail-close {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            width: 32px;
+            height: 32px;
+            border-radius: 6px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.25rem;
+            flex-shrink: 0;
+            margin-left: 1rem;
+        }
+
+        .detail-close:hover {
+            background: var(--bg-primary);
+            color: var(--text-primary);
+        }
+
+        .detail-section {
+            padding: 1rem 1.25rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .detail-section:last-child {
+            border-bottom: none;
+        }
+
+        .detail-section-title {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.75rem;
+            font-weight: 600;
+        }
+
+        .detail-description {
+            font-size: 0.875rem;
+            line-height: 1.6;
+            color: var(--text-primary);
+            white-space: pre-wrap;
+        }
+
+        .detail-context {
+            font-size: 0.8rem;
+            line-height: 1.5;
+            color: var(--text-secondary);
+            background: var(--bg-card);
+            padding: 0.75rem;
+            border-radius: 6px;
+            white-space: pre-wrap;
+        }
+
+        .detail-files {
+            display: flex;
+            flex-direction: column;
+            gap: 0.375rem;
+        }
+
+        .detail-file {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem;
+            background: var(--bg-card);
+            border-radius: 4px;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: background 0.1s;
+        }
+
+        .detail-file:hover {
+            background: var(--bg-primary);
+        }
+
+        .detail-file-icon {
+            color: var(--text-muted);
+        }
+
+        .detail-file-path {
+            font-family: monospace;
+            color: var(--blue);
+            flex: 1;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .detail-file-copy {
+            color: var(--text-muted);
+            font-size: 0.7rem;
+            opacity: 0;
+            transition: opacity 0.1s;
+        }
+
+        .detail-file:hover .detail-file-copy {
+            opacity: 1;
+        }
+
+        .detail-deps {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .detail-dep {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem;
+            background: var(--bg-card);
+            border-radius: 4px;
+            font-size: 0.8rem;
+        }
+
+        .detail-dep-type {
+            color: var(--text-muted);
+            font-size: 0.7rem;
+            text-transform: uppercase;
+        }
+
+        .detail-dep-id {
+            font-family: monospace;
+            color: var(--purple);
+            cursor: pointer;
+        }
+
+        .detail-dep-id:hover {
+            text-decoration: underline;
+        }
+
+        .detail-dep-status {
+            font-size: 0.65rem;
+            padding: 0.1rem 0.3rem;
+            border-radius: 3px;
+            margin-left: auto;
+        }
+
+        .detail-dep-status.done { background: var(--green); color: white; }
+        .detail-dep-status.blocked { background: var(--red); color: white; }
+        .detail-dep-status.in_progress { background: var(--blue); color: white; }
+
+        .detail-activity {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+
+        .activity-item {
+            display: flex;
+            gap: 0.75rem;
+            font-size: 0.8rem;
+        }
+
+        .activity-icon {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: var(--bg-card);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            font-size: 0.7rem;
+        }
+
+        .activity-icon.status { background: var(--blue); color: white; }
+        .activity-icon.note { background: var(--purple); color: white; }
+        .activity-icon.file { background: var(--green); color: white; }
+
+        .activity-content {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .activity-text {
+            color: var(--text-primary);
+            margin-bottom: 0.25rem;
+        }
+
+        .activity-time {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+        }
+
+        .activity-actor {
+            color: var(--blue);
+            font-weight: 500;
+        }
+
+        .detail-meta {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 0.75rem;
+        }
+
+        .meta-item {
+            background: var(--bg-card);
+            padding: 0.625rem;
+            border-radius: 4px;
+        }
+
+        .meta-label {
+            font-size: 0.65rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            margin-bottom: 0.25rem;
+        }
+
+        .meta-value {
+            font-size: 0.875rem;
+            color: var(--text-primary);
+        }
+
+        .detail-blockers {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid var(--red);
+            padding: 0.75rem;
+            border-radius: 6px;
+            color: var(--red);
+            font-size: 0.875rem;
+            line-height: 1.5;
+            white-space: pre-wrap;
+        }
+
+        .detail-handoff {
+            background: rgba(59, 130, 246, 0.1);
+            border: 1px solid var(--blue);
+            padding: 0.75rem;
+            border-radius: 6px;
+            color: var(--text-primary);
+            font-size: 0.875rem;
+            line-height: 1.5;
+            white-space: pre-wrap;
+        }
+
+        .detail-progress {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .detail-progress-bar {
+            flex: 1;
+            height: 8px;
+            background: var(--bg-card);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .detail-progress-fill {
+            height: 100%;
+            background: var(--green);
+            border-radius: 4px;
+            transition: width 0.3s;
+        }
+
+        .detail-progress-text {
+            font-size: 0.875rem;
+            font-weight: 600;
+            min-width: 40px;
+            text-align: right;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 1rem;
+            color: var(--text-muted);
+            font-size: 0.8rem;
+            font-style: italic;
+        }
+
+        /* Card clickable */
+        .card.clickable {
+            cursor: pointer;
+        }
+
+        .card.clickable:active {
+            transform: scale(0.98);
+        }
+
+        /* Toast notification for copy */
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%) translateY(100px);
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            padding: 0.75rem 1.25rem;
+            border-radius: 6px;
+            font-size: 0.875rem;
+            color: var(--text-primary);
+            opacity: 0;
+            transition: transform 0.3s, opacity 0.3s;
+            z-index: 300;
+        }
+
+        .toast.show {
+            transform: translateX(-50%) translateY(0);
+            opacity: 1;
+        }
     </style>
 </head>
 <body>
     <div id="app"><div class="no-data">Loading...</div></div>
+    <div class="detail-backdrop" id="detailBackdrop" onclick="closeDetail()"></div>
+    <div class="detail-panel" id="detailPanel"></div>
+    <div class="toast" id="toast"></div>
     <script>
         // Kanban board rendering script
         // Data is sanitized server-side before embedding, and the esc() function
@@ -712,7 +1130,8 @@ KANBAN_HTML_TEMPLATE = '''<!DOCTYPE html>
         function renderCard(task) {
             var story = (data.stories||[]).find(function(s) { return s.id === task.story_id; }) || {};
             var epic = (data.epics||[]).find(function(e) { return e.id === story.epic_id; }) || {};
-            var html = '<div class="card">';
+            var hasDetails = task.description || task.context_summary || task.blockers || task.handoff_notes;
+            var html = '<div class="card clickable" onclick="openDetail(\\'' + esc(task.id) + '\\')">';
             html += '<div class="card-header">';
             html += '<span class="card-id">' + esc(task.id) + '</span>';
             if (epic.priority) {
@@ -726,9 +1145,14 @@ KANBAN_HTML_TEMPLATE = '''<!DOCTYPE html>
             } else {
                 html += '<span></span>';
             }
-            if (task.estimate_hours) {
-                html += '<span>' + task.estimate_hours + 'h</span>';
+            var metaRight = '';
+            if (task.progress_percent != null && task.progress_percent > 0) {
+                metaRight += '<span style="color:var(--green)">' + task.progress_percent + '%</span> ';
             }
+            if (task.estimate_hours) {
+                metaRight += '<span>' + task.estimate_hours + 'h</span>';
+            }
+            html += metaRight || '<span></span>';
             html += '</div>';
             if (epic.title) {
                 html += '<div class="card-epic">' + esc(epic.title);
@@ -787,10 +1211,251 @@ KANBAN_HTML_TEMPLATE = '''<!DOCTYPE html>
             app.innerHTML = '<header class="header"><h1>Kanban Board</h1></header>' +
                 '<div class="no-data">' +
                 '<h2 style="margin-bottom:1rem">No Data</h2>' +
-                '<p>Run <code>prd-analyzer</code> to create tasks<br>or ensure <code>.claude/tasks.db</code> exists</p>' +
+                '<p>Run <code>prd-analyzer</code> to create tasks<br>or ensure <code>.ohno/tasks.db</code> exists</p>' +
                 '<p style="margin-top:1rem;font-size:0.8rem;color:var(--text-muted)">Auto-refreshing...</p>' +
                 '</div>';
         }
+
+        // Detail panel functions
+        var currentTaskId = null;
+
+        function openDetail(taskId) {
+            currentTaskId = taskId;
+            var task = (data.tasks||[]).find(function(t) { return t.id === taskId; });
+            if (!task) return;
+
+            var panel = document.getElementById('detailPanel');
+            var backdrop = document.getElementById('detailBackdrop');
+
+            renderDetailPanel(task, panel);
+            panel.classList.add('open');
+            backdrop.classList.add('open');
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeDetail() {
+            var panel = document.getElementById('detailPanel');
+            var backdrop = document.getElementById('detailBackdrop');
+            panel.classList.remove('open');
+            backdrop.classList.remove('open');
+            document.body.style.overflow = '';
+            currentTaskId = null;
+        }
+
+        function renderDetailPanel(task, panel) {
+            var story = (data.stories||[]).find(function(s) { return s.id === task.story_id; }) || {};
+            var epic = (data.epics||[]).find(function(e) { return e.id === story.epic_id; }) || {};
+            var taskFiles = (data.task_files||[]).filter(function(f) { return f.task_id === task.id; });
+            var taskDeps = (data.task_dependencies||[]).filter(function(d) { return d.task_id === task.id; });
+            var taskActivity = (data.task_activity||[]).filter(function(a) { return a.task_id === task.id; })
+                .sort(function(a, b) { return new Date(b.created_at) - new Date(a.created_at); }).slice(0, 20);
+
+            var html = '<div class="detail-header">';
+            html += '<div class="detail-header-left">';
+            html += '<div class="detail-id">' + esc(task.id) + '</div>';
+            html += '<div class="detail-title">' + esc(task.title) + '</div>';
+            html += '<div class="detail-badges">';
+            if (task.status) {
+                var statusColors = {todo:'var(--text-muted)',in_progress:'var(--blue)',review:'var(--purple)',done:'var(--green)',blocked:'var(--red)'};
+                html += '<span class="detail-badge" style="background:' + (statusColors[task.status]||'var(--text-muted)') + ';color:white">' + esc(task.status.replace('_',' ')) + '</span>';
+            }
+            if (epic.priority) {
+                var priColors = {P0:'var(--red)',P1:'var(--orange)',P2:'var(--yellow)',P3:'var(--text-muted)'};
+                var priText = epic.priority === 'P2' ? 'black' : 'white';
+                html += '<span class="detail-badge" style="background:' + (priColors[epic.priority]||'var(--text-muted)') + ';color:' + priText + '">' + esc(epic.priority) + '</span>';
+            }
+            if (task.task_type) {
+                html += '<span class="detail-badge" style="background:var(--bg-card)">' + esc(task.task_type) + '</span>';
+            }
+            html += '</div></div>';
+            html += '<button class="detail-close" onclick="closeDetail()">&times;</button>';
+            html += '</div>';
+
+            // Progress section
+            if (task.progress_percent != null) {
+                html += '<div class="detail-section">';
+                html += '<div class="detail-section-title">Progress</div>';
+                html += '<div class="detail-progress">';
+                html += '<div class="detail-progress-bar"><div class="detail-progress-fill" style="width:' + (task.progress_percent || 0) + '%"></div></div>';
+                html += '<span class="detail-progress-text">' + (task.progress_percent || 0) + '%</span>';
+                html += '</div></div>';
+            }
+
+            // Blockers section (if blocked)
+            if (task.blockers) {
+                html += '<div class="detail-section">';
+                html += '<div class="detail-section-title">Blockers</div>';
+                html += '<div class="detail-blockers">' + esc(task.blockers) + '</div>';
+                html += '</div>';
+            }
+
+            // Description section
+            if (task.description) {
+                html += '<div class="detail-section">';
+                html += '<div class="detail-section-title">Description</div>';
+                html += '<div class="detail-description">' + esc(task.description) + '</div>';
+                html += '</div>';
+            }
+
+            // Context section
+            if (task.context_summary) {
+                html += '<div class="detail-section">';
+                html += '<div class="detail-section-title">Context</div>';
+                html += '<div class="detail-context">' + esc(task.context_summary) + '</div>';
+                html += '</div>';
+            }
+
+            // Handoff notes
+            if (task.handoff_notes) {
+                html += '<div class="detail-section">';
+                html += '<div class="detail-section-title">Handoff Notes</div>';
+                html += '<div class="detail-handoff">' + esc(task.handoff_notes) + '</div>';
+                html += '</div>';
+            }
+
+            // Working files from task field
+            if (task.working_files) {
+                html += '<div class="detail-section">';
+                html += '<div class="detail-section-title">Working Files</div>';
+                html += '<div class="detail-files">';
+                var files = task.working_files.split(',').map(function(f) { return f.trim(); }).filter(Boolean);
+                files.forEach(function(f) {
+                    html += '<div class="detail-file" onclick="copyToClipboard(\\'' + esc(f) + '\\')">';
+                    html += '<span class="detail-file-icon">📄</span>';
+                    html += '<span class="detail-file-path">' + esc(f) + '</span>';
+                    html += '<span class="detail-file-copy">Copy</span>';
+                    html += '</div>';
+                });
+                html += '</div></div>';
+            }
+
+            // Files from task_files table
+            if (taskFiles.length > 0) {
+                html += '<div class="detail-section">';
+                html += '<div class="detail-section-title">Associated Files</div>';
+                html += '<div class="detail-files">';
+                taskFiles.forEach(function(f) {
+                    html += '<div class="detail-file" onclick="copyToClipboard(\\'' + esc(f.file_path) + '\\')">';
+                    html += '<span class="detail-file-icon">' + (f.file_type === 'modified' ? '✏️' : f.file_type === 'created' ? '➕' : '📄') + '</span>';
+                    html += '<span class="detail-file-path">' + esc(f.file_path) + '</span>';
+                    html += '<span class="detail-file-copy">Copy</span>';
+                    html += '</div>';
+                });
+                html += '</div></div>';
+            }
+
+            // Dependencies
+            if (taskDeps.length > 0) {
+                html += '<div class="detail-section">';
+                html += '<div class="detail-section-title">Dependencies</div>';
+                html += '<div class="detail-deps">';
+                taskDeps.forEach(function(d) {
+                    var depTask = (data.tasks||[]).find(function(t) { return t.id === d.depends_on_task_id; });
+                    var depStatus = depTask ? depTask.status : 'unknown';
+                    html += '<div class="detail-dep">';
+                    html += '<span class="detail-dep-type">' + esc(d.dependency_type || 'blocks') + '</span>';
+                    html += '<span class="detail-dep-id" onclick="openDetail(\\'' + esc(d.depends_on_task_id) + '\\')">' + esc(d.depends_on_task_id) + '</span>';
+                    if (depTask) {
+                        html += '<span class="detail-dep-status ' + depStatus + '">' + esc(depStatus.replace('_',' ')) + '</span>';
+                    }
+                    html += '</div>';
+                });
+                html += '</div></div>';
+            }
+
+            // Activity
+            html += '<div class="detail-section">';
+            html += '<div class="detail-section-title">Activity</div>';
+            if (taskActivity.length > 0) {
+                html += '<div class="detail-activity">';
+                taskActivity.forEach(function(a) {
+                    var iconClass = a.activity_type === 'status_change' ? 'status' : a.activity_type === 'note' ? 'note' : 'file';
+                    var iconChar = a.activity_type === 'status_change' ? '→' : a.activity_type === 'note' ? '📝' : '📎';
+                    html += '<div class="activity-item">';
+                    html += '<div class="activity-icon ' + iconClass + '">' + iconChar + '</div>';
+                    html += '<div class="activity-content">';
+                    html += '<div class="activity-text">';
+                    if (a.actor) html += '<span class="activity-actor">' + esc(a.actor) + '</span> ';
+                    if (a.activity_type === 'status_change') {
+                        html += 'Changed status';
+                        if (a.old_value) html += ' from <strong>' + esc(a.old_value) + '</strong>';
+                        if (a.new_value) html += ' to <strong>' + esc(a.new_value) + '</strong>';
+                    } else {
+                        html += esc(a.description || a.activity_type);
+                    }
+                    html += '</div>';
+                    html += '<div class="activity-time">' + formatTime(a.created_at) + '</div>';
+                    html += '</div></div>';
+                });
+                html += '</div>';
+            } else {
+                html += '<div class="empty-state">No activity recorded</div>';
+            }
+            html += '</div>';
+
+            // Metadata
+            html += '<div class="detail-section">';
+            html += '<div class="detail-section-title">Details</div>';
+            html += '<div class="detail-meta">';
+            if (epic.title) {
+                html += '<div class="meta-item"><div class="meta-label">Epic</div><div class="meta-value">' + esc(epic.title) + '</div></div>';
+            }
+            if (story.title) {
+                html += '<div class="meta-item"><div class="meta-label">Story</div><div class="meta-value">' + esc(story.title) + '</div></div>';
+            }
+            if (task.estimate_hours) {
+                html += '<div class="meta-item"><div class="meta-label">Estimate</div><div class="meta-value">' + task.estimate_hours + ' hours</div></div>';
+            }
+            if (task.actual_hours) {
+                html += '<div class="meta-item"><div class="meta-label">Actual</div><div class="meta-value">' + task.actual_hours + ' hours</div></div>';
+            }
+            if (task.created_by) {
+                html += '<div class="meta-item"><div class="meta-label">Created By</div><div class="meta-value">' + esc(task.created_by) + '</div></div>';
+            }
+            if (task.created_at) {
+                html += '<div class="meta-item"><div class="meta-label">Created</div><div class="meta-value">' + formatTime(task.created_at) + '</div></div>';
+            }
+            if (task.updated_at) {
+                html += '<div class="meta-item"><div class="meta-label">Updated</div><div class="meta-value">' + formatTime(task.updated_at) + '</div></div>';
+            }
+            html += '</div></div>';
+
+            panel.innerHTML = html;
+        }
+
+        function formatTime(isoStr) {
+            if (!isoStr) return '';
+            try {
+                var d = new Date(isoStr);
+                var now = new Date();
+                var diff = now - d;
+                if (diff < 60000) return 'Just now';
+                if (diff < 3600000) return Math.floor(diff/60000) + 'm ago';
+                if (diff < 86400000) return Math.floor(diff/3600000) + 'h ago';
+                if (diff < 604800000) return Math.floor(diff/86400000) + 'd ago';
+                return d.toLocaleDateString();
+            } catch(e) { return isoStr; }
+        }
+
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text).then(function() {
+                showToast('Copied: ' + text);
+            }).catch(function() {
+                showToast('Failed to copy');
+            });
+        }
+
+        function showToast(msg) {
+            var toast = document.getElementById('toast');
+            toast.textContent = msg;
+            toast.classList.add('show');
+            setTimeout(function() { toast.classList.remove('show'); }, 2000);
+        }
+
+        // Keyboard handler for ESC
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape' && currentTaskId) closeDetail();
+        });
 
         document.addEventListener('DOMContentLoaded', init);
     </script>
@@ -945,7 +1610,7 @@ def cmd_serve(args):
 
     if not claude_dir.exists():
         out.error(
-            f"{CLAUDE_DIR}/ folder not found",
+            f"{OHNO_DIR}/ folder not found",
             f"Searched from {Path.cwd()} upward",
             [
                 f"Initialize with: kanban init",
@@ -1109,14 +1774,14 @@ def cmd_status(args):
 
 
 def cmd_init(args):
-    """Initialize .claude/ folder structure."""
+    """Initialize .ohno/ folder structure."""
     global out
     out = Output(quiet=args.quiet, json_mode=args.json, no_color=args.no_color)
 
-    claude_dir = Path.cwd() / CLAUDE_DIR
+    claude_dir = Path.cwd() / OHNO_DIR
 
     if claude_dir.exists() and not args.force:
-        out.warning(f"{CLAUDE_DIR}/ already exists (use --force to overwrite)")
+        out.warning(f"{OHNO_DIR}/ already exists (use --force to overwrite)")
         if args.json:
             out.json_output({"status": "exists", "path": str(claude_dir)})
         sys.exit(EXIT_SUCCESS)
@@ -1142,8 +1807,8 @@ def cmd_init(args):
     if args.json:
         out.json_output({"status": "created", "path": str(claude_dir)})
     else:
-        out.success(f"Created {CLAUDE_DIR}/ folder")
-        out.info(f"  {CLAUDE_DIR}/")
+        out.success(f"Created {OHNO_DIR}/ folder")
+        out.info(f"  {OHNO_DIR}/")
         out.info(f"  ├── sessions/")
         out.info(f"  ├── checkpoints/")
         out.info(f"  └── kanban.html")
@@ -1176,7 +1841,7 @@ Examples:
   kanban sync               One-time sync
   kanban status             Show project stats
   kanban status --json      Machine-readable output
-  kanban init               Initialize .claude/ folder
+  kanban init               Initialize .ohno/ folder
 
 Environment Variables:
   KANBAN_PORT               Default port (default: 3333)
@@ -1215,7 +1880,7 @@ Environment Variables:
     status_parser.add_argument("--json", "-j", action="store_true", help="Output as JSON")
 
     # init
-    init_parser = subparsers.add_parser("init", help="Initialize .claude/ folder")
+    init_parser = subparsers.add_parser("init", help="Initialize .ohno/ folder")
     init_parser.add_argument("--force", "-f", action="store_true", help="Overwrite existing folder")
 
     # version (also available as --version)

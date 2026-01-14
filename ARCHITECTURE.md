@@ -14,7 +14,7 @@ This document captures the architectural decisions for the kanban board CLI tool
                                  │ write
                                  ▼
                     ┌─────────────────────────┐
-                    │    .claude/tasks.db     │
+                    │    .ohno/tasks.db     │
                     │   (SQLite database)     │
                     └────────────┬────────────┘
                                  │ read (watch)
@@ -26,7 +26,7 @@ This document captures the architectural decisions for the kanban board CLI tool
                                  │ generate
                                  ▼
                     ┌─────────────────────────┐
-                    │   .claude/kanban.html   │
+                    │   .ohno/kanban.html   │
                     │  (self-contained board) │
                     └─────────────────────────┘
 ```
@@ -92,7 +92,7 @@ This document captures the architectural decisions for the kanban board CLI tool
 - HTTP serving with live reload
 - Project statistics (status command)
 - JSON export for programmatic access
-- Initialization of .claude/ structure
+- Initialization of .ohno/ structure
 
 **Out of Scope (intentionally):**
 - Task CRUD operations (skills own this)
@@ -116,8 +116,8 @@ Skills ──write──> tasks.db <──write── kanban.py  ✗ Bidirection
 Priority (highest to lowest):
 1. --dir /explicit/path argument
 2. KANBAN_DIR environment variable
-3. Walk up from cwd to find .claude/
-4. Default to ./.claude if nothing found
+3. Walk up from cwd to find .ohno/
+4. Default to ./.ohno if nothing found
 ```
 
 **Rationale:** Follows git's model for finding `.git/`. Works from any subdirectory.
@@ -153,7 +153,7 @@ KANBAN_NO_COLOR=1          # Disable colored output
 |---------|------------|
 | XSS in task titles | HTML escaping via `esc()` function |
 | SQL injection | No user input to SQL (read-only) |
-| Path traversal | HTTP server restricted to .claude/ |
+| Path traversal | HTTP server restricted to .ohno/ |
 | Network exposure | Bind to 127.0.0.1 by default |
 
 **Critical fix applied:** Default bind to localhost only, not all interfaces.
@@ -167,7 +167,7 @@ kanban [command] [flags]
 ├── serve     Start server + watcher (default)
 ├── sync      One-time sync
 ├── status    Show project statistics
-├── init      Initialize .claude/ folder
+├── init      Initialize .ohno/ folder
 └── version   Show version information
 ```
 
@@ -210,6 +210,8 @@ Suggestions:
 
 The tool expects this schema from skills:
 
+### Core Tables
+
 ```sql
 projects     (id, name, ...)
 epics        (id, title, priority, audit_level, ...)
@@ -217,6 +219,86 @@ stories      (id, epic_id, title, status, ...)
 tasks        (id, story_id, title, status, task_type, estimate_hours, ...)
 dependencies (...)
 ```
+
+### Extended Task Fields (v1.1+)
+
+The tasks table can include these additional fields for richer task context:
+
+```sql
+tasks (
+    -- Core fields (v1.0)
+    id TEXT PRIMARY KEY,
+    story_id TEXT,
+    title TEXT,
+    status TEXT,           -- todo, in_progress, review, done, blocked
+    task_type TEXT,        -- feature, bug, chore, spike, test
+    estimate_hours REAL,
+
+    -- Extended fields (v1.1+, all optional)
+    description TEXT,      -- Detailed task description (markdown)
+    context_summary TEXT,  -- AI-generated context for handoff
+    working_files TEXT,    -- Comma-separated list of relevant files
+    blockers TEXT,         -- Current blockers (shown prominently when blocked)
+    handoff_notes TEXT,    -- Notes for next agent/session
+    progress_percent INT,  -- 0-100 progress indicator
+    actual_hours REAL,     -- Actual time spent
+    created_at TEXT,       -- ISO timestamp
+    updated_at TEXT,       -- ISO timestamp (auto-updated)
+    created_by TEXT        -- Agent/user who created the task
+)
+```
+
+### Extended Tables (v1.1+)
+
+For comprehensive activity tracking and file association:
+
+```sql
+-- Activity log for audit trail
+task_activity (
+    id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
+    activity_type TEXT,    -- status_change, note, file_change
+    description TEXT,
+    old_value TEXT,        -- For status changes
+    new_value TEXT,        -- For status changes
+    actor TEXT,            -- Agent/user who made the change
+    created_at TEXT
+)
+
+-- Associated files
+task_files (
+    id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
+    file_path TEXT NOT NULL,
+    file_type TEXT,        -- created, modified, referenced
+    created_at TEXT
+)
+
+-- Task dependencies
+task_dependencies (
+    id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
+    depends_on_task_id TEXT NOT NULL,
+    dependency_type TEXT,  -- blocks, requires, related
+    created_at TEXT
+)
+```
+
+### Recommended Indexes
+
+```sql
+CREATE INDEX idx_tasks_status ON tasks(status);
+CREATE INDEX idx_tasks_story_id ON tasks(story_id);
+CREATE INDEX idx_task_activity_task_id ON task_activity(task_id);
+CREATE INDEX idx_task_files_task_id ON task_files(task_id);
+CREATE INDEX idx_task_deps_task_id ON task_dependencies(task_id);
+```
+
+### Backward Compatibility
+
+- All extended fields and tables are optional
+- The kanban tool gracefully handles missing columns/tables
+- Skills can adopt extended schema incrementally
 
 Skills must maintain backward compatibility with this schema.
 
@@ -236,8 +318,8 @@ chmod +x ~/.local/bin/kanban
 
 **Alternative: Copy to project**
 ```bash
-cp kanban.py .claude/
-python .claude/kanban.py serve
+cp kanban.py .ohno/
+python .ohno/kanban.py serve
 ```
 
 ## Future Considerations
