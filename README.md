@@ -1,240 +1,212 @@
-# Kanban CLI
+# Ohno
 
-A standalone CLI tool for visualizing and serving a kanban board from SQLite databases.
+> *Named after [Taiichi Ohno](https://en.wikipedia.org/wiki/Taiichi_Ohno), the father of the Toyota Production System and inventor of Kanban.*
+
+**Task management for AI agent workflows** - enables session continuity across context compaction, new sessions, and agent handoffs.
+
+## The Problem
+
+AI agents lose context. When:
+- Context window fills up and gets compacted
+- A new session starts
+- One agent hands off to another
+
+The agent forgets what it was working on, what's done, and what's blocked.
+
+## The Solution
+
+Ohno provides two tools that share a common task database:
+
+| Tool | Purpose | Consumer |
+|------|---------|----------|
+| **ohno-mcp** | Query/update task state | AI agents (via MCP) |
+| **kanban.py** | Visual kanban board | Humans (via browser) |
 
 ```
-$ kanban serve
-Syncing...
-Loaded 45 tasks (37.5% done)
-
-Kanban board ready!
-  URL: http://localhost:3333/kanban.html
-  Auto-refreshes when tasks.db changes
-  Press Ctrl+C to stop
-```
-
-## Features
-
-- **Zero dependencies** - Pure Python stdlib, no pip install needed
-- **Single file** - Copy anywhere and run
-- **Live reload** - Watches `tasks.db` for changes, auto-regenerates HTML
-- **Self-contained HTML** - No external assets, works offline
-- **Machine-readable output** - JSON mode for scripting and CI/CD
-- **Works from any subdirectory** - Finds `.ohno/` by walking up
-
-## Installation
-
-### Option 1: pipx (Recommended)
-```bash
-pipx install kanban-cli
-kanban serve
-```
-
-### Option 2: Single file script
-```bash
-curl -o ~/.local/bin/kanban https://raw.githubusercontent.com/YOUR_USERNAME/kanban-cli/main/kanban.py
-chmod +x ~/.local/bin/kanban
-kanban serve
-```
-
-### Option 3: Copy to project
-```bash
-cp kanban.py .ohno/
-python .ohno/kanban.py serve
+┌─────────────────────────────────────────────────────────────┐
+│                      Claude Code                             │
+│                                                              │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │                    ohno-mcp                           │   │
+│  │                                                       │   │
+│  │  get_session_context()  ← Resume after compaction    │   │
+│  │  update_task_status()   ← Mark done/in_progress      │   │
+│  │  set_handoff_notes()    ← Leave notes for next       │   │
+│  └───────────────────────────┬──────────────────────────┘   │
+│                              │                               │
+└──────────────────────────────┼───────────────────────────────┘
+                               │ read/write
+                  ┌────────────┴────────────┐
+                  │    .ohno/tasks.db       │
+                  └────────────┬────────────┘
+                               │ read + watch
+                  ┌────────────┴────────────┐
+                  │      kanban.py          │  → browser (human)
+                  └─────────────────────────┘
 ```
 
 ## Quick Start
 
-```bash
-# Initialize project structure
-kanban init
-
-# Start the server (opens http://localhost:3333/kanban.html)
-kanban serve
-
-# One-time sync (for CI/CD)
-kanban sync
-
-# Check project status
-kanban status
-```
-
-## Commands
-
-### `kanban serve`
-
-Start HTTP server with file watching.
+### For Agents (MCP Server)
 
 ```bash
-kanban serve                    # Default: localhost:3333
-kanban serve --port 8080        # Custom port
-kanban serve --host 0.0.0.0     # Allow network access
+# Install
+pip install ohno-mcp
+
+# Or from source
+cd ohno-mcp && pip install -e .
 ```
 
-| Flag | Short | Description |
-|------|-------|-------------|
-| `--port` | `-p` | Port to listen on (default: 3333) |
-| `--host` | `-H` | Host to bind to (default: 127.0.0.1) |
+Add to Claude Code settings (`~/.claude/settings.json`):
 
-### `kanban sync`
+```json
+{
+  "mcpServers": {
+    "ohno": {
+      "command": "ohno-mcp",
+      "args": []
+    }
+  }
+}
+```
 
-One-time sync of `tasks.db` to `kanban.html`.
+### For Humans (Visual Board)
 
 ```bash
-kanban sync                     # Generate HTML
-kanban sync --json              # Output stats as JSON
+# Option 1: Run directly (zero dependencies)
+python kanban.py serve
+
+# Option 2: Copy to your project
+cp kanban.py .ohno/
+python .ohno/kanban.py serve
 ```
 
-### `kanban status`
+Open http://localhost:3333/kanban.html to see your tasks.
 
-Show project statistics.
+## CLAUDE.md Example
+
+Add this to your project's `CLAUDE.md` to enable agent workflow:
+
+```markdown
+## Task Management (Ohno)
+
+This project uses Ohno for task tracking across sessions.
+
+### Session Start
+Always call `get_session_context()` at session start to:
+- See tasks currently in progress
+- Check for blocked tasks
+- Read handoff notes from previous session
+- Get suggested next task
+
+### During Work
+- Use `update_task_status(task_id, "in_progress")` when starting a task
+- Use `add_task_activity(task_id, "note", "...")` to log decisions/progress
+- Use `update_task_progress(task_id, percent)` for incremental progress
+
+### Before Ending Session
+Always call before session ends or context compaction:
+- `set_handoff_notes(task_id, "what's done, what's next, gotchas")`
+- `update_task_progress(task_id, percent)`
+
+### Task Management
+- `create_task(title, ...)` - When you discover new work needed
+- `archive_task(task_id, reason)` - When a task is no longer needed
+- `set_blocker(task_id, reason)` - When blocked on something
+
+### Visual Board
+Run `python kanban.py serve` to view tasks at http://localhost:3333/kanban.html
+```
+
+## MCP Tools Reference
+
+### Query Tools
+
+| Tool | Description |
+|------|-------------|
+| `get_session_context()` | **Start here** - in-progress tasks, blockers, recent activity |
+| `get_project_status()` | Overall progress statistics |
+| `get_tasks(status?, priority?)` | List tasks with filtering |
+| `get_task(task_id)` | Full details for a specific task |
+| `get_next_task()` | Recommended task based on priority |
+| `get_blocked_tasks()` | All blocked tasks with reasons |
+
+### Update Tools
+
+| Tool | Description |
+|------|-------------|
+| `update_task_status(task_id, status)` | Change status (todo/in_progress/review/done/blocked) |
+| `update_task_progress(task_id, percent)` | Update completion percentage |
+| `set_handoff_notes(task_id, notes)` | Leave notes for next session |
+| `add_task_activity(task_id, type, desc)` | Log activity (note/decision/progress) |
+| `set_blocker(task_id, reason)` | Mark task as blocked |
+| `resolve_blocker(task_id)` | Clear blocker, resume work |
+
+### CRUD Tools
+
+| Tool | Description |
+|------|-------------|
+| `create_task(title, ...)` | Create new task discovered during work |
+| `update_task(task_id, ...)` | Modify task details |
+| `archive_task(task_id, reason)` | Archive task no longer needed |
+
+## Kanban CLI Reference
+
+### Commands
 
 ```bash
-kanban status                   # Human-readable
-kanban status --json            # Machine-readable
+kanban serve              # Start visual board server
+kanban serve --port 8080  # Custom port
+kanban status             # Show project stats
+kanban status --json      # Machine-readable output
+kanban sync               # One-time HTML generation (for CI/CD)
+kanban init               # Initialize .ohno/ folder
 ```
 
-Example output:
-```
-PROJECT STATUS
-========================================
-Project: My Project
+### Features
 
-Tasks
-  Total:       120
-  Done:        45 (37.5%)
-  In Progress: 12
-  Review:      5
-  Blocked:     3
-  To Do:       55
-
-Epics
-  Total: 8
-  P0:    2
-  P1:    4
-
-Stories
-  Total: 24
-  Done:  10
-```
-
-### `kanban init`
-
-Initialize `.ohno/` folder structure.
-
-```bash
-kanban init                     # Create .ohno/ folder
-kanban init --force             # Overwrite existing
-```
-
-Creates:
-```
-.ohno/
-├── sessions/
-├── checkpoints/
-└── kanban.html
-```
-
-## Global Flags
-
-| Flag | Short | Description |
-|------|-------|-------------|
-| `--quiet` | `-q` | Suppress non-error output |
-| `--json` | `-j` | Output in JSON format |
-| `--no-color` | | Disable colored output |
-| `--dir` | `-d` | Override project directory |
-| `--version` | `-V` | Show version |
-| `--help` | `-h` | Show help |
-
-## Environment Variables
-
-```bash
-KANBAN_PORT=3333           # Default port
-KANBAN_HOST=127.0.0.1      # Default host
-KANBAN_DIR=/path/to/project # Override directory discovery
-KANBAN_WATCH_INTERVAL=1.0  # File watch interval (seconds)
-KANBAN_NO_COLOR=1          # Disable colored output
-NO_COLOR=1                 # Standard no-color env var
-```
+- **Zero dependencies** - Pure Python stdlib
+- **Single file** - Copy anywhere and run
+- **Live reload** - Watches tasks.db, auto-refreshes browser
+- **Self-contained HTML** - No external assets
+- **Detail panel** - Click any task for full details, files, activity history
 
 ## Database Schema
 
-The tool expects a SQLite database (`tasks.db`) with these tables:
+Both tools share the same SQLite database (`.ohno/tasks.db`):
 
 ```sql
+-- Core tables (created by prd-analyzer or other skills)
 projects (id, name, ...)
 epics    (id, title, priority, audit_level, ...)
 stories  (id, epic_id, title, status, ...)
-tasks    (id, story_id, title, status, task_type, estimate_hours, ...)
+tasks    (id, story_id, title, status, task_type, estimate_hours,
+          description, context_summary, working_files, blockers,
+          handoff_notes, progress_percent, ...)
+
+-- Extended tables (for activity tracking)
+task_activity    (id, task_id, activity_type, description, ...)
+task_files       (id, task_id, file_path, file_type, ...)
+task_dependencies (id, task_id, depends_on_task_id, ...)
 ```
 
-Task statuses: `todo`, `in_progress`, `review`, `done`, `blocked`
+See [ARCHITECTURE.md](ARCHITECTURE.md) for full schema details.
 
-## Exit Codes
+## Installation Options
 
-| Code | Meaning |
-|------|---------|
-| 0 | Success |
-| 1 | General error |
-| 2 | Usage error |
-| 3 | Configuration error (.ohno/ not found) |
-| 4 | Database error (tasks.db not found/corrupted) |
-| 5 | Network error (port in use) |
+| You want... | Install |
+|-------------|---------|
+| Visual board only | `python kanban.py serve` |
+| Agent continuity only | `pip install ohno-mcp` + configure MCP |
+| Full experience | Both |
 
-## CI/CD Integration
+## Related Projects
 
-```yaml
-# GitHub Actions example
-- name: Generate kanban board
-  run: |
-    python kanban.py sync --quiet
-
-- name: Check project status
-  run: |
-    python kanban.py status --json > status.json
-```
-
-## Architecture
-
-See [ARCHITECTURE.md](ARCHITECTURE.md) for design decisions and rationale.
-
-Key design principles:
-- **Read-only visualization** - Skills own the database, kanban only reads
-- **Database as integration boundary** - Clean contract between components
-- **Convention over configuration** - Works out of the box
-
-## Development
-
-```bash
-# Run from source
-python kanban.py serve
-
-# Run tests (coming soon)
-python -m pytest tests/
-
-# Type check (coming soon)
-python -m mypy kanban.py
-```
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Run tests
-5. Submit a pull request
-
-Please read [ARCHITECTURE.md](ARCHITECTURE.md) before contributing to understand the design decisions.
+Ohno is designed to work with Claude Code skills:
+- **prd-analyzer** - Parse PRDs and create tasks in tasks.db
+- **project-harness** - Orchestrate multi-session development
+- **product-manager** - Audit feature completeness
 
 ## License
 
 MIT License - see [LICENSE](LICENSE) for details.
-
-## Related Projects
-
-This tool is designed to work with:
-- **prd-analyzer** - Parse PRDs and create tasks
-- **product-manager** - Manage product requirements
-- **project-harness** - Orchestrate development sessions
-
-All these tools write to `tasks.db`, and kanban visualizes the results.
