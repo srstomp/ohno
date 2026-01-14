@@ -797,6 +797,17 @@ KANBAN_HTML_TEMPLATE = '''<!DOCTYPE html>
             }
             html += '</div>';
             html += '<div class="card-title">' + esc(task.title) + '</div>';
+
+            // Check for blocking dependencies
+            var taskDeps = (data.task_dependencies||[]).filter(function(d) { return d.task_id === task.id; });
+            var blockedByDeps = taskDeps.some(function(d) {
+                var depTask = (data.tasks||[]).find(function(t) { return t.id === d.depends_on_task_id; });
+                return depTask && depTask.status !== 'done';
+            });
+            if (blockedByDeps && task.status === 'todo') {
+                html += '<div style="font-size:0.65rem;color:var(--orange);margin-bottom:0.25rem;display:flex;align-items:center;gap:0.25rem;"><span style="opacity:0.7">&#9203;</span> Waiting on dependencies</div>';
+            }
+
             html += '<div class="card-meta">';
             if (task.task_type) {
                 html += '<span class="card-type">' + esc(task.task_type) + '</span>';

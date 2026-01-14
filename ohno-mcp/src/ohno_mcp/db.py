@@ -5,12 +5,44 @@ Provides clean abstractions over the SQLite database schema used by
 skills (prd-analyzer, project-harness) and visualized by kanban.py.
 """
 
+import hashlib
 import sqlite3
 import uuid
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Union
+
+
+# --- Hash-based ID Generation ---
+# These provide collision-resistant IDs derived from content rather than pure random.
+
+
+def generate_task_id(title: str, story_id: Optional[str], timestamp: str) -> str:
+    """
+    Generate a content-based task ID.
+
+    Format: task-{hash[:8]} where hash is derived from title + story_id + timestamp.
+    This provides better collision resistance than pure random while being deterministic
+    for the same inputs.
+    """
+    content = f"{title}|{story_id or ''}|{timestamp}"
+    hash_hex = hashlib.sha256(content.encode()).hexdigest()
+    return f"task-{hash_hex[:8]}"
+
+
+def generate_activity_id(task_id: str, activity_type: str, timestamp: str) -> str:
+    """Generate a content-based activity ID."""
+    content = f"{task_id}|{activity_type}|{timestamp}"
+    hash_hex = hashlib.sha256(content.encode()).hexdigest()
+    return f"act-{hash_hex[:8]}"
+
+
+def generate_dependency_id(task_id: str, depends_on_task_id: str) -> str:
+    """Generate a content-based dependency ID."""
+    content = f"{task_id}|{depends_on_task_id}"
+    hash_hex = hashlib.sha256(content.encode()).hexdigest()
+    return f"dep-{hash_hex[:8]}"
 
 
 @dataclass
@@ -32,6 +64,7 @@ class Task:
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
     created_by: Optional[str] = None
+    activity_summary: Optional[str] = None  # Compressed activity history
 
     # Joined fields (not in tasks table directly)
     story_title: Optional[str] = None
@@ -55,6 +88,22 @@ class TaskActivity:
     new_value: Optional[str] = None
     actor: Optional[str] = None
     created_at: Optional[str] = None
+
+    def to_dict(self) -> dict:
+        return {k: v for k, v in asdict(self).items() if v is not None}
+
+
+@dataclass
+class TaskDependency:
+    """Task dependency record."""
+    id: str
+    task_id: str
+    depends_on_task_id: str
+    dependency_type: Optional[str] = None  # blocks, requires, relates_to
+    created_at: Optional[str] = None
+    # Joined fields for display
+    depends_on_title: Optional[str] = None
+    depends_on_status: Optional[str] = None
 
     def to_dict(self) -> dict:
         return {k: v for k, v in asdict(self).items() if v is not None}
@@ -153,6 +202,23 @@ class TaskDatabase:
                 )
             """)
 
+            # Create indexes for performance
+            try:
+                conn.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_task_activity_task_id
+                    ON task_activity(task_id)
+                """)
+            except sqlite3.OperationalError:
+                pass  # Index already exists or table doesn't exist
+
+            try:
+                conn.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_task_deps_task_id
+                    ON task_dependencies(task_id)
+                """)
+            except sqlite3.OperationalError:
+                pass
+
             # Add extended columns to tasks if they don't exist
             # SQLite doesn't have IF NOT EXISTS for ALTER TABLE, so we catch errors
             extended_columns = [
@@ -166,6 +232,7 @@ class TaskDatabase:
                 ("created_at", "TEXT"),
                 ("updated_at", "TEXT"),
                 ("created_by", "TEXT"),
+                ("activity_summary", "TEXT"),  # Compressed activity history
             ]
 
             for col_name, col_type in extended_columns:
@@ -313,7 +380,7 @@ class TaskDatabase:
                 for field_name in [
                     "description", "context_summary", "working_files", "blockers",
                     "handoff_notes", "progress_percent", "actual_hours",
-                    "created_at", "updated_at", "created_by"
+                    "created_at", "updated_at", "created_by", "activity_summary"
                 ]:
                     if field_name in row.keys():
                         setattr(task, field_name, row[field_name])
@@ -405,16 +472,23 @@ class TaskDatabase:
         finally:
             conn.close()
 
-        # Suggest next task (highest priority non-blocked todo)
-        next_tasks = self.get_tasks(status="todo", limit=5)
+        # Suggest next task (highest priority non-blocked todo WITH satisfied dependencies)
+        next_tasks = self.get_tasks(status="todo", limit=20)  # Get more candidates
         if next_tasks:
-            # Sort by priority (P0 > P1 > P2 > None)
-            priority_order = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
-            sorted_tasks = sorted(
-                next_tasks,
-                key=lambda t: priority_order.get(t.epic_priority, 99)
-            )
-            ctx.suggested_next_task = sorted_tasks[0].to_dict()
+            # Filter out tasks with unfinished dependencies
+            available_tasks = [
+                t for t in next_tasks
+                if not self.is_task_blocked_by_dependencies(t.id)
+            ]
+
+            if available_tasks:
+                # Sort by priority (P0 > P1 > P2 > None)
+                priority_order = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
+                sorted_tasks = sorted(
+                    available_tasks,
+                    key=lambda t: priority_order.get(t.epic_priority, 99)
+                )
+                ctx.suggested_next_task = sorted_tasks[0].to_dict()
 
         return ctx
 
@@ -470,7 +544,7 @@ class TaskDatabase:
                 """, (status, now, task_id))
 
             # Log activity
-            activity_id = f"act-{uuid.uuid4().hex[:8]}"
+            activity_id = generate_activity_id(task_id, "status_change", now)
             conn.execute("""
                 INSERT INTO task_activity
                 (id, task_id, activity_type, old_value, new_value, actor, created_at)
@@ -478,6 +552,11 @@ class TaskDatabase:
             """, (activity_id, task_id, old_status, status, actor, now))
 
             conn.commit()
+
+            # Auto-summarize on completion (done or archived)
+            if status in ("done", "archived"):
+                self.summarize_task_activity(task_id, delete_raw=False)
+
             return True
         except sqlite3.Error:
             return False
@@ -495,7 +574,7 @@ class TaskDatabase:
         conn = self._get_connection()
         try:
             now = datetime.now().isoformat()
-            activity_id = f"act-{uuid.uuid4().hex[:8]}"
+            activity_id = generate_activity_id(task_id, activity_type, now)
 
             conn.execute("""
                 INSERT INTO task_activity
@@ -590,7 +669,7 @@ class TaskDatabase:
             """, (reason, now, task_id))
 
             # Log activity
-            activity_id = f"act-{uuid.uuid4().hex[:8]}"
+            activity_id = generate_activity_id(task_id, "status_change", now)
             conn.execute("""
                 INSERT INTO task_activity
                 (id, task_id, activity_type, description, old_value, new_value, actor, created_at)
@@ -618,7 +697,7 @@ class TaskDatabase:
             """, (now, task_id))
 
             # Log activity
-            activity_id = f"act-{uuid.uuid4().hex[:8]}"
+            activity_id = generate_activity_id(task_id, "status_change", now)
             conn.execute("""
                 INSERT INTO task_activity
                 (id, task_id, activity_type, description, old_value, new_value, actor, created_at)
@@ -645,7 +724,16 @@ class TaskDatabase:
         conn = self._get_connection()
         try:
             now = datetime.now().isoformat()
-            task_id = f"task-{uuid.uuid4().hex[:8]}"
+            task_id = generate_task_id(title, story_id, now)
+
+            # Handle collision by appending counter if ID exists
+            base_id = task_id
+            counter = 1
+            while conn.execute("SELECT 1 FROM tasks WHERE id = ?", (task_id,)).fetchone():
+                task_id = f"{base_id}-{counter}"
+                counter += 1
+                if counter > 100:  # Safety limit
+                    return None
 
             conn.execute("""
                 INSERT INTO tasks
@@ -655,7 +743,7 @@ class TaskDatabase:
             """, (task_id, story_id, title, task_type, description, estimate_hours, now, now, actor))
 
             # Log activity
-            activity_id = f"act-{uuid.uuid4().hex[:8]}"
+            activity_id = generate_activity_id(task_id, "created", now)
             conn.execute("""
                 INSERT INTO task_activity
                 (id, task_id, activity_type, description, actor, created_at)
@@ -711,7 +799,7 @@ class TaskDatabase:
             conn.execute(query, params)
 
             # Log activity
-            activity_id = f"act-{uuid.uuid4().hex[:8]}"
+            activity_id = generate_activity_id(task_id, "updated", now)
             changes = []
             if title:
                 changes.append(f"title to '{title}'")
@@ -759,7 +847,7 @@ class TaskDatabase:
             """, (now, task_id))
 
             # Log activity
-            activity_id = f"act-{uuid.uuid4().hex[:8]}"
+            activity_id = generate_activity_id(task_id, "status_change", now)
             description = f"Task archived"
             if reason:
                 description += f": {reason}"
@@ -793,5 +881,211 @@ class TaskDatabase:
             return conn.total_changes > 0
         except sqlite3.Error:
             return False
+        finally:
+            conn.close()
+
+    # --- Dependency Management ---
+
+    def add_dependency(
+        self,
+        task_id: str,
+        depends_on_task_id: str,
+        dependency_type: str = "blocks",
+    ) -> Optional[str]:
+        """
+        Add a dependency between tasks. Returns dependency ID or None.
+
+        The task specified by task_id will depend on depends_on_task_id,
+        meaning task_id cannot be started until depends_on_task_id is done.
+        """
+        conn = self._get_connection()
+        try:
+            # Verify both tasks exist
+            t1 = conn.execute("SELECT id FROM tasks WHERE id = ?", (task_id,)).fetchone()
+            t2 = conn.execute("SELECT id FROM tasks WHERE id = ?", (depends_on_task_id,)).fetchone()
+            if not t1 or not t2:
+                return None
+
+            # Prevent self-dependency
+            if task_id == depends_on_task_id:
+                return None
+
+            # Check for duplicate
+            existing = conn.execute("""
+                SELECT id FROM task_dependencies
+                WHERE task_id = ? AND depends_on_task_id = ?
+            """, (task_id, depends_on_task_id)).fetchone()
+            if existing:
+                return existing["id"]  # Already exists
+
+            now = datetime.now().isoformat()
+            dep_id = generate_dependency_id(task_id, depends_on_task_id)
+
+            conn.execute("""
+                INSERT INTO task_dependencies
+                (id, task_id, depends_on_task_id, dependency_type, created_at)
+                VALUES (?, ?, ?, ?, ?)
+            """, (dep_id, task_id, depends_on_task_id, dependency_type, now))
+
+            conn.commit()
+            return dep_id
+        except sqlite3.Error:
+            return None
+        finally:
+            conn.close()
+
+    def remove_dependency(self, task_id: str, depends_on_task_id: str) -> bool:
+        """Remove a dependency between tasks."""
+        conn = self._get_connection()
+        try:
+            cursor = conn.execute("""
+                DELETE FROM task_dependencies
+                WHERE task_id = ? AND depends_on_task_id = ?
+            """, (task_id, depends_on_task_id))
+            conn.commit()
+            return cursor.rowcount > 0
+        except sqlite3.Error:
+            return False
+        finally:
+            conn.close()
+
+    def get_task_dependencies(self, task_id: str) -> list[TaskDependency]:
+        """Get all dependencies for a task (tasks this task depends on)."""
+        conn = self._get_connection()
+        try:
+            rows = conn.execute("""
+                SELECT d.*, t.title as depends_on_title, t.status as depends_on_status
+                FROM task_dependencies d
+                JOIN tasks t ON d.depends_on_task_id = t.id
+                WHERE d.task_id = ?
+            """, (task_id,)).fetchall()
+
+            return [
+                TaskDependency(
+                    id=row["id"],
+                    task_id=row["task_id"],
+                    depends_on_task_id=row["depends_on_task_id"],
+                    dependency_type=row["dependency_type"],
+                    created_at=row["created_at"],
+                    depends_on_title=row["depends_on_title"],
+                    depends_on_status=row["depends_on_status"],
+                )
+                for row in rows
+            ]
+        except sqlite3.OperationalError:
+            return []
+        finally:
+            conn.close()
+
+    def get_blocking_dependencies(self, task_id: str) -> list[str]:
+        """Get task IDs that are blocking this task (not done yet)."""
+        conn = self._get_connection()
+        try:
+            rows = conn.execute("""
+                SELECT d.depends_on_task_id
+                FROM task_dependencies d
+                JOIN tasks t ON d.depends_on_task_id = t.id
+                WHERE d.task_id = ? AND t.status != 'done'
+            """, (task_id,)).fetchall()
+            return [row["depends_on_task_id"] for row in rows]
+        except sqlite3.OperationalError:
+            return []
+        finally:
+            conn.close()
+
+    def is_task_blocked_by_dependencies(self, task_id: str) -> bool:
+        """Check if a task has unfinished dependencies."""
+        return len(self.get_blocking_dependencies(task_id)) > 0
+
+    # --- Activity Summarization ---
+
+    def summarize_task_activity(
+        self,
+        task_id: str,
+        delete_raw: bool = False,
+        min_entries: int = 5,
+    ) -> Optional[str]:
+        """
+        Summarize task activity into a compact text format.
+
+        Args:
+            task_id: Task to summarize
+            delete_raw: If True, delete raw activity entries after summarization
+            min_entries: Minimum entries required to trigger summarization
+
+        Returns:
+            Summary text or None if insufficient activity
+        """
+        conn = self._get_connection()
+        try:
+            # Get all activity for this task
+            rows = conn.execute("""
+                SELECT * FROM task_activity
+                WHERE task_id = ?
+                ORDER BY created_at ASC
+            """, (task_id,)).fetchall()
+
+            if len(rows) < min_entries:
+                return None  # Not enough to summarize
+
+            # Build summary
+            now = datetime.now().isoformat()
+            summary_lines = [f"Activity summary generated at {now[:10]}"]
+            summary_lines.append(f"Total entries: {len(rows)}")
+            summary_lines.append("")
+
+            # Count by type
+            type_counts: dict[str, int] = {}
+            for row in rows:
+                t = row["activity_type"] or "unknown"
+                type_counts[t] = type_counts.get(t, 0) + 1
+
+            summary_lines.append("By type:")
+            for t, c in sorted(type_counts.items()):
+                summary_lines.append(f"  - {t}: {c}")
+
+            # Status change timeline
+            status_changes = [r for r in rows if r["activity_type"] == "status_change"]
+            if status_changes:
+                summary_lines.append("")
+                summary_lines.append("Status history:")
+                for sc in status_changes:
+                    ts = sc["created_at"][:10] if sc["created_at"] else "?"
+                    old = sc["old_value"] or "?"
+                    new = sc["new_value"] or "?"
+                    summary_lines.append(f"  - {ts}: {old} -> {new}")
+
+            # Recent notes (last 3)
+            notes = [r for r in rows if r["activity_type"] == "note"]
+            if notes:
+                summary_lines.append("")
+                summary_lines.append("Recent notes:")
+                for note in notes[-3:]:
+                    desc = note["description"] or ""
+                    if len(desc) > 100:
+                        desc = desc[:100] + "..."
+                    summary_lines.append(f"  - {desc}")
+
+            summary = "\n".join(summary_lines)
+
+            # Store summary on task
+            conn.execute("""
+                UPDATE tasks SET activity_summary = ?, updated_at = ?
+                WHERE id = ?
+            """, (summary, now, task_id))
+
+            # Optionally delete raw entries (keep last 3 for context)
+            if delete_raw and len(rows) >= 3:
+                keep_ids = [r["id"] for r in rows[-3:]]
+                placeholders = ",".join("?" * len(keep_ids))
+                conn.execute(f"""
+                    DELETE FROM task_activity
+                    WHERE task_id = ? AND id NOT IN ({placeholders})
+                """, [task_id] + keep_ids)
+
+            conn.commit()
+            return summary
+        except sqlite3.Error:
+            return None
         finally:
             conn.close()
