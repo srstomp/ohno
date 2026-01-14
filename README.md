@@ -49,39 +49,49 @@ Ohno provides two tools that share a common task database:
 
 ### For Agents (MCP Server)
 
-```bash
-# Install
-pip install ohno-mcp
-
-# Or from source
-cd ohno-mcp && pip install -e .
-```
-
 Add to Claude Code settings (`~/.claude/settings.json`):
 
 ```json
 {
   "mcpServers": {
     "ohno": {
-      "command": "ohno-mcp",
-      "args": []
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/srstomp/ohno.git#subdirectory=ohno-mcp", "ohno-mcp"]
     }
   }
 }
 ```
 
+Or install manually:
+```bash
+pip install git+https://github.com/srstomp/ohno.git#subdirectory=ohno-mcp
+```
+
 ### For Humans (Visual Board)
 
 ```bash
-# Option 1: Run directly (zero dependencies)
-python kanban.py serve
+# Download to your project (zero dependencies, single file)
+curl -o kanban.py https://raw.githubusercontent.com/srstomp/ohno/master/kanban.py
 
-# Option 2: Copy to your project
-cp kanban.py .ohno/
-python .ohno/kanban.py serve
+# Run it
+python kanban.py serve
 ```
 
 Open http://localhost:3333/kanban.html to see your tasks.
+
+### Both Tools Together
+
+```bash
+# Clone the repo
+git clone https://github.com/srstomp/ohno.git
+cd ohno
+
+# Install MCP server
+pip install -e ohno-mcp/
+
+# Run visual board
+python kanban.py serve
+```
 
 ## CLAUDE.md Example
 
@@ -115,7 +125,11 @@ Always call before session ends or context compaction:
 - `set_blocker(task_id, reason)` - When blocked on something
 
 ### Visual Board
-Run `python kanban.py serve` to view tasks at http://localhost:3333/kanban.html
+```bash
+curl -o kanban.py https://raw.githubusercontent.com/srstomp/ohno/master/kanban.py
+python kanban.py serve
+```
+View tasks at http://localhost:3333/kanban.html
 ```
 
 ## MCP Tools Reference
@@ -155,12 +169,12 @@ Run `python kanban.py serve` to view tasks at http://localhost:3333/kanban.html
 ### Commands
 
 ```bash
-kanban serve              # Start visual board server
-kanban serve --port 8080  # Custom port
-kanban status             # Show project stats
-kanban status --json      # Machine-readable output
-kanban sync               # One-time HTML generation (for CI/CD)
-kanban init               # Initialize .ohno/ folder
+python kanban.py serve              # Start visual board server
+python kanban.py serve --port 8080  # Custom port
+python kanban.py status             # Show project stats
+python kanban.py status --json      # Machine-readable output
+python kanban.py sync               # One-time HTML generation (for CI/CD)
+python kanban.py init               # Initialize .ohno/ folder
 ```
 
 ### Features
@@ -196,9 +210,9 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for full schema details.
 
 | You want... | Install |
 |-------------|---------|
-| Visual board only | `python kanban.py serve` |
-| Agent continuity only | `pip install ohno-mcp` + configure MCP |
-| Full experience | Both |
+| Visual board only | `curl -o kanban.py https://raw.githubusercontent.com/srstomp/ohno/master/kanban.py && python kanban.py serve` |
+| Agent continuity only | Add MCP config (see Quick Start) |
+| Full experience | Clone repo, install both |
 
 ## Related Projects
 
