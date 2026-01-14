@@ -1,0 +1,1176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Task Detail Panel - Kanban Board</title>
+    <style>
+        /* CSS Variables */
+        :root {
+            --bg-primary: #0f172a;
+            --bg-secondary: #1e293b;
+            --bg-card: #334155;
+            --text-primary: #f1f5f9;
+            --text-secondary: #94a3b8;
+            --blue: #3b82f6;
+            --green: #22c55e;
+            --red: #ef4444;
+            --yellow: #eab308;
+            --purple: #a855f7;
+            --orange: #f97316;
+            --panel-width: 600px;
+            --transition-duration: 300ms;
+        }
+
+        /* Reset & Base */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+
+        /* Demo Page Styles */
+        .demo-container {
+            padding: 40px;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .demo-title {
+            font-size: 24px;
+            margin-bottom: 20px;
+            color: var(--text-primary);
+        }
+
+        .demo-btn {
+            background-color: var(--blue);
+            color: var(--text-primary);
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 150ms ease;
+        }
+
+        .demo-btn:hover {
+            background-color: #2563eb;
+        }
+
+        /* Backdrop Overlay */
+        .task-panel-backdrop {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(0, 0, 0, 0.6);
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity var(--transition-duration) ease, visibility var(--transition-duration) ease;
+            z-index: 1000;
+        }
+
+        .task-panel-backdrop.active {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        /* Slide-out Panel */
+        .task-panel {
+            position: fixed;
+            top: 0;
+            right: 0;
+            width: var(--panel-width);
+            max-width: 100vw;
+            height: 100vh;
+            background-color: var(--bg-secondary);
+            transform: translateX(100%);
+            transition: transform var(--transition-duration) cubic-bezier(0.4, 0, 0.2, 1);
+            z-index: 1001;
+            display: flex;
+            flex-direction: column;
+            box-shadow: -4px 0 24px rgba(0, 0, 0, 0.3);
+        }
+
+        .task-panel.active {
+            transform: translateX(0);
+        }
+
+        /* Panel Header */
+        .task-panel-header {
+            padding: 24px;
+            border-bottom: 1px solid var(--bg-card);
+            flex-shrink: 0;
+        }
+
+        .task-panel-header-top {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            margin-bottom: 12px;
+        }
+
+        .task-id {
+            font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+            font-size: 13px;
+            color: var(--text-secondary);
+            background-color: var(--bg-card);
+            padding: 4px 8px;
+            border-radius: 4px;
+        }
+
+        .task-panel-close {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            padding: 4px;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: color 150ms ease, background-color 150ms ease;
+        }
+
+        .task-panel-close:hover {
+            color: var(--text-primary);
+            background-color: var(--bg-card);
+        }
+
+        .task-title {
+            font-size: 20px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin: 12px 0;
+            line-height: 1.4;
+        }
+
+        .task-badges {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .badge {
+            font-size: 12px;
+            font-weight: 500;
+            padding: 4px 10px;
+            border-radius: 9999px;
+            text-transform: capitalize;
+        }
+
+        /* Status Badges */
+        .badge-status-todo {
+            background-color: rgba(148, 163, 184, 0.2);
+            color: var(--text-secondary);
+        }
+
+        .badge-status-in_progress {
+            background-color: rgba(59, 130, 246, 0.2);
+            color: var(--blue);
+        }
+
+        .badge-status-blocked {
+            background-color: rgba(239, 68, 68, 0.2);
+            color: var(--red);
+        }
+
+        .badge-status-done {
+            background-color: rgba(34, 197, 94, 0.2);
+            color: var(--green);
+        }
+
+        /* Priority Badges */
+        .badge-priority-critical {
+            background-color: rgba(239, 68, 68, 0.2);
+            color: var(--red);
+        }
+
+        .badge-priority-high {
+            background-color: rgba(249, 115, 22, 0.2);
+            color: var(--orange);
+        }
+
+        .badge-priority-medium {
+            background-color: rgba(234, 179, 8, 0.2);
+            color: var(--yellow);
+        }
+
+        .badge-priority-low {
+            background-color: rgba(34, 197, 94, 0.2);
+            color: var(--green);
+        }
+
+        /* Panel Content */
+        .task-panel-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 24px;
+        }
+
+        .task-panel-content::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .task-panel-content::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .task-panel-content::-webkit-scrollbar-thumb {
+            background-color: var(--bg-card);
+            border-radius: 4px;
+        }
+
+        .task-panel-content::-webkit-scrollbar-thumb:hover {
+            background-color: #475569;
+        }
+
+        /* Section Styles */
+        .task-section {
+            margin-bottom: 24px;
+        }
+
+        .task-section:last-child {
+            margin-bottom: 0;
+        }
+
+        .section-title {
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-secondary);
+            margin-bottom: 12px;
+        }
+
+        /* Description Section */
+        .description-box {
+            background-color: var(--bg-primary);
+            border: 1px solid var(--bg-card);
+            border-left: 3px solid var(--blue);
+            border-radius: 8px;
+            padding: 16px;
+        }
+
+        .description-text {
+            font-size: 14px;
+            line-height: 1.6;
+            color: var(--text-primary);
+            white-space: pre-wrap;
+        }
+
+        .context-summary {
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid var(--bg-card);
+        }
+
+        .context-label {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--yellow);
+            margin-bottom: 8px;
+        }
+
+        .context-text {
+            font-size: 13px;
+            line-height: 1.5;
+            color: var(--text-secondary);
+            font-style: italic;
+        }
+
+        /* Files List */
+        .files-list {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .file-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            background-color: var(--bg-primary);
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background-color 150ms ease;
+        }
+
+        .file-item:hover {
+            background-color: var(--bg-card);
+        }
+
+        .file-icon {
+            color: var(--text-secondary);
+            flex-shrink: 0;
+        }
+
+        .file-path {
+            font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+            font-size: 13px;
+            color: var(--text-primary);
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .file-copy-icon {
+            color: var(--text-secondary);
+            opacity: 0;
+            transition: opacity 150ms ease;
+            flex-shrink: 0;
+        }
+
+        .file-item:hover .file-copy-icon {
+            opacity: 1;
+        }
+
+        .file-item.copied .file-copy-icon {
+            color: var(--green);
+            opacity: 1;
+        }
+
+        /* Dependencies Section */
+        .dependencies-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+
+        .dependency-column {
+            background-color: var(--bg-primary);
+            border-radius: 8px;
+            padding: 12px;
+        }
+
+        .dependency-label {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 8px;
+        }
+
+        .dependency-label.blocked-by {
+            color: var(--red);
+        }
+
+        .dependency-label.blocks {
+            color: var(--orange);
+        }
+
+        .dependency-list {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .dependency-item {
+            font-size: 13px;
+            color: var(--text-primary);
+            padding: 6px 8px;
+            background-color: var(--bg-secondary);
+            border-radius: 4px;
+        }
+
+        .dependency-item code {
+            font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+            font-size: 12px;
+            background-color: var(--bg-card);
+            padding: 2px 6px;
+            border-radius: 4px;
+            margin-right: 4px;
+        }
+
+        .dependency-empty {
+            font-size: 13px;
+            color: var(--text-secondary);
+            font-style: italic;
+        }
+
+        /* Activity Timeline */
+        .activity-timeline {
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+        }
+
+        .activity-item {
+            display: flex;
+            gap: 12px;
+            padding: 12px 0;
+            border-bottom: 1px solid var(--bg-card);
+        }
+
+        .activity-item:last-child {
+            border-bottom: none;
+        }
+
+        .activity-icon-wrapper {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+
+        .activity-icon-wrapper.note {
+            background-color: rgba(59, 130, 246, 0.2);
+            color: var(--blue);
+        }
+
+        .activity-icon-wrapper.status_change {
+            background-color: rgba(168, 85, 247, 0.2);
+            color: var(--purple);
+        }
+
+        .activity-icon-wrapper.file_added {
+            background-color: rgba(34, 197, 94, 0.2);
+            color: var(--green);
+        }
+
+        .activity-icon-wrapper.file_removed {
+            background-color: rgba(239, 68, 68, 0.2);
+            color: var(--red);
+        }
+
+        .activity-icon-wrapper.blocker_added {
+            background-color: rgba(239, 68, 68, 0.2);
+            color: var(--red);
+        }
+
+        .activity-icon-wrapper.blocker_resolved {
+            background-color: rgba(34, 197, 94, 0.2);
+            color: var(--green);
+        }
+
+        .activity-icon-wrapper.created {
+            background-color: rgba(234, 179, 8, 0.2);
+            color: var(--yellow);
+        }
+
+        .activity-content {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .activity-header {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 8px;
+            margin-bottom: 4px;
+        }
+
+        .activity-type {
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text-primary);
+        }
+
+        .activity-time {
+            font-size: 11px;
+            color: var(--text-secondary);
+            flex-shrink: 0;
+        }
+
+        .activity-description {
+            font-size: 13px;
+            color: var(--text-secondary);
+            line-height: 1.5;
+        }
+
+        .activity-description code {
+            font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+            font-size: 12px;
+            background-color: var(--bg-card);
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+
+        /* Metadata Footer */
+        .task-panel-footer {
+            padding: 16px 24px;
+            border-top: 1px solid var(--bg-card);
+            background-color: var(--bg-primary);
+            flex-shrink: 0;
+        }
+
+        .metadata-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+        }
+
+        .metadata-item {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .metadata-label {
+            font-size: 11px;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-secondary);
+        }
+
+        .metadata-value {
+            font-size: 13px;
+            color: var(--text-primary);
+        }
+
+        /* Empty State */
+        .empty-state {
+            text-align: center;
+            padding: 24px;
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+
+        /* Toast Notification */
+        .toast {
+            position: fixed;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%) translateY(100px);
+            background-color: var(--bg-card);
+            color: var(--text-primary);
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            opacity: 0;
+            transition: transform 200ms ease, opacity 200ms ease;
+            z-index: 1002;
+        }
+
+        .toast.visible {
+            transform: translateX(-50%) translateY(0);
+            opacity: 1;
+        }
+
+        .toast-success {
+            border-left: 3px solid var(--green);
+        }
+
+        /* Responsive */
+        @media (max-width: 640px) {
+            .task-panel {
+                width: 100vw;
+            }
+
+            .dependencies-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Demo Trigger -->
+    <div class="demo-container">
+        <h1 class="demo-title">Task Detail Panel Demo</h1>
+        <button class="demo-btn" id="openPanelBtn">Open Task Panel</button>
+    </div>
+
+    <!-- Backdrop -->
+    <div class="task-panel-backdrop" id="taskPanelBackdrop"></div>
+
+    <!-- Slide-out Panel -->
+    <div class="task-panel" id="taskPanel">
+        <div class="task-panel-header">
+            <div class="task-panel-header-top">
+                <span class="task-id" id="taskId"></span>
+                <button class="task-panel-close" id="taskPanelClose" aria-label="Close panel">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                </button>
+            </div>
+            <h2 class="task-title" id="taskTitle"></h2>
+            <div class="task-badges" id="taskBadges"></div>
+        </div>
+
+        <div class="task-panel-content" id="taskPanelContent">
+            <!-- Content built by JavaScript using safe DOM methods -->
+        </div>
+
+        <div class="task-panel-footer" id="taskPanelFooter">
+            <div class="metadata-grid" id="metadataGrid"></div>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div class="toast toast-success" id="toast">Copied to clipboard</div>
+
+    <script>
+        // Sample task data for demo
+        const sampleTask = {
+            id: "T-1234",
+            title: "Fix authentication middleware token validation bug",
+            status: "in_progress",
+            priority: "high",
+            description: "The authentication middleware is not properly validating JWT tokens when they contain special characters in the payload. This causes intermittent 401 errors for users with certain email formats.\n\nSteps to reproduce:\n1. Create a user with email containing '+' character\n2. Login and obtain JWT token\n3. Make authenticated API request\n4. Observe 401 error",
+            context_summary: "Last stopped at investigating the base64 decoding step. The issue appears to be in auth/jwt_utils.py line 47 where URL-safe base64 is not being used.",
+            working_files: [
+                "auth/middleware.py",
+                "auth/jwt_utils.py",
+                "tests/test_auth.py",
+                "config/security.py"
+            ],
+            blockers: [
+                {
+                    id: "B-1",
+                    description: "Waiting for security team review",
+                    created_at: "2024-01-15T10:00:00Z"
+                }
+            ],
+            blocked_tasks: [
+                {
+                    id: "T-1235",
+                    title: "Implement OAuth2 provider"
+                },
+                {
+                    id: "T-1240",
+                    title: "Add rate limiting to auth endpoints"
+                }
+            ],
+            activity: [
+                {
+                    event_type: "note",
+                    event_data: {
+                        content: "Found the root cause - need to use urlsafe_b64decode instead of standard b64decode"
+                    },
+                    created_at: "2024-01-15T14:30:00Z"
+                },
+                {
+                    event_type: "file_added",
+                    event_data: {
+                        file_path: "tests/test_auth.py"
+                    },
+                    created_at: "2024-01-15T11:20:00Z"
+                },
+                {
+                    event_type: "blocker_added",
+                    event_data: {
+                        description: "Waiting for security team review"
+                    },
+                    created_at: "2024-01-15T10:00:00Z"
+                },
+                {
+                    event_type: "status_change",
+                    event_data: {
+                        from: "todo",
+                        to: "in_progress"
+                    },
+                    created_at: "2024-01-14T09:00:00Z"
+                },
+                {
+                    event_type: "created",
+                    event_data: {},
+                    created_at: "2024-01-13T16:45:00Z"
+                }
+            ],
+            created_at: "2024-01-13T16:45:00Z",
+            updated_at: "2024-01-15T14:30:00Z",
+            created_by: "alice",
+            assigned_to: "bob"
+        };
+
+        // DOM Elements
+        const taskPanel = document.getElementById('taskPanel');
+        const taskPanelBackdrop = document.getElementById('taskPanelBackdrop');
+        const taskPanelClose = document.getElementById('taskPanelClose');
+        const taskPanelContent = document.getElementById('taskPanelContent');
+        const toast = document.getElementById('toast');
+
+        // State
+        let isOpen = false;
+        let toastTimeout = null;
+
+        // SVG icon templates (using createElementNS for safe creation)
+        const svgNS = "http://www.w3.org/2000/svg";
+
+        function createSvgIcon(type) {
+            const svg = document.createElementNS(svgNS, "svg");
+            svg.setAttribute("width", "14");
+            svg.setAttribute("height", "14");
+            svg.setAttribute("viewBox", "0 0 24 24");
+            svg.setAttribute("fill", "none");
+            svg.setAttribute("stroke", "currentColor");
+            svg.setAttribute("stroke-width", "2");
+            svg.setAttribute("stroke-linecap", "round");
+            svg.setAttribute("stroke-linejoin", "round");
+
+            switch (type) {
+                case 'note': {
+                    const path1 = document.createElementNS(svgNS, "path");
+                    path1.setAttribute("d", "M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7");
+                    const path2 = document.createElementNS(svgNS, "path");
+                    path2.setAttribute("d", "M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z");
+                    svg.appendChild(path1);
+                    svg.appendChild(path2);
+                    break;
+                }
+                case 'status_change': {
+                    const polyline = document.createElementNS(svgNS, "polyline");
+                    polyline.setAttribute("points", "23 4 23 10 17 10");
+                    const path = document.createElementNS(svgNS, "path");
+                    path.setAttribute("d", "M20.49 15a9 9 0 1 1-2.12-9.36L23 10");
+                    svg.appendChild(polyline);
+                    svg.appendChild(path);
+                    break;
+                }
+                case 'file_added': {
+                    const path1 = document.createElementNS(svgNS, "path");
+                    path1.setAttribute("d", "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z");
+                    const polyline = document.createElementNS(svgNS, "polyline");
+                    polyline.setAttribute("points", "14 2 14 8 20 8");
+                    const line1 = document.createElementNS(svgNS, "line");
+                    line1.setAttribute("x1", "12"); line1.setAttribute("y1", "18");
+                    line1.setAttribute("x2", "12"); line1.setAttribute("y2", "12");
+                    const line2 = document.createElementNS(svgNS, "line");
+                    line2.setAttribute("x1", "9"); line2.setAttribute("y1", "15");
+                    line2.setAttribute("x2", "15"); line2.setAttribute("y2", "15");
+                    svg.appendChild(path1);
+                    svg.appendChild(polyline);
+                    svg.appendChild(line1);
+                    svg.appendChild(line2);
+                    break;
+                }
+                case 'file_removed': {
+                    const path1 = document.createElementNS(svgNS, "path");
+                    path1.setAttribute("d", "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z");
+                    const polyline = document.createElementNS(svgNS, "polyline");
+                    polyline.setAttribute("points", "14 2 14 8 20 8");
+                    const line = document.createElementNS(svgNS, "line");
+                    line.setAttribute("x1", "9"); line.setAttribute("y1", "15");
+                    line.setAttribute("x2", "15"); line.setAttribute("y2", "15");
+                    svg.appendChild(path1);
+                    svg.appendChild(polyline);
+                    svg.appendChild(line);
+                    break;
+                }
+                case 'blocker_added': {
+                    const circle = document.createElementNS(svgNS, "circle");
+                    circle.setAttribute("cx", "12"); circle.setAttribute("cy", "12"); circle.setAttribute("r", "10");
+                    const line = document.createElementNS(svgNS, "line");
+                    line.setAttribute("x1", "4.93"); line.setAttribute("y1", "4.93");
+                    line.setAttribute("x2", "19.07"); line.setAttribute("y2", "19.07");
+                    svg.appendChild(circle);
+                    svg.appendChild(line);
+                    break;
+                }
+                case 'blocker_resolved': {
+                    const path = document.createElementNS(svgNS, "path");
+                    path.setAttribute("d", "M22 11.08V12a10 10 0 1 1-5.93-9.14");
+                    const polyline = document.createElementNS(svgNS, "polyline");
+                    polyline.setAttribute("points", "22 4 12 14.01 9 11.01");
+                    svg.appendChild(path);
+                    svg.appendChild(polyline);
+                    break;
+                }
+                case 'created': {
+                    const circle = document.createElementNS(svgNS, "circle");
+                    circle.setAttribute("cx", "12"); circle.setAttribute("cy", "12"); circle.setAttribute("r", "10");
+                    const line1 = document.createElementNS(svgNS, "line");
+                    line1.setAttribute("x1", "12"); line1.setAttribute("y1", "8");
+                    line1.setAttribute("x2", "12"); line1.setAttribute("y2", "12");
+                    const line2 = document.createElementNS(svgNS, "line");
+                    line2.setAttribute("x1", "12"); line2.setAttribute("y1", "16");
+                    line2.setAttribute("x2", "12.01"); line2.setAttribute("y2", "16");
+                    svg.appendChild(circle);
+                    svg.appendChild(line1);
+                    svg.appendChild(line2);
+                    break;
+                }
+                case 'file': {
+                    svg.setAttribute("width", "16");
+                    svg.setAttribute("height", "16");
+                    svg.classList.add("file-icon");
+                    const path = document.createElementNS(svgNS, "path");
+                    path.setAttribute("d", "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z");
+                    const polyline = document.createElementNS(svgNS, "polyline");
+                    polyline.setAttribute("points", "14 2 14 8 20 8");
+                    svg.appendChild(path);
+                    svg.appendChild(polyline);
+                    break;
+                }
+                case 'copy': {
+                    svg.classList.add("file-copy-icon");
+                    const rect = document.createElementNS(svgNS, "rect");
+                    rect.setAttribute("x", "9"); rect.setAttribute("y", "9");
+                    rect.setAttribute("width", "13"); rect.setAttribute("height", "13");
+                    rect.setAttribute("rx", "2"); rect.setAttribute("ry", "2");
+                    const path = document.createElementNS(svgNS, "path");
+                    path.setAttribute("d", "M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1");
+                    svg.appendChild(rect);
+                    svg.appendChild(path);
+                    break;
+                }
+            }
+
+            return svg;
+        }
+
+        // Open panel with task data
+        function openTaskPanel(task) {
+            if (!task) return;
+
+            renderTaskPanel(task);
+            taskPanel.classList.add('active');
+            taskPanelBackdrop.classList.add('active');
+            isOpen = true;
+            document.body.style.overflow = 'hidden';
+        }
+
+        // Close panel
+        function closeTaskPanel() {
+            taskPanel.classList.remove('active');
+            taskPanelBackdrop.classList.remove('active');
+            isOpen = false;
+            document.body.style.overflow = '';
+        }
+
+        // Utility: Format status
+        function formatStatus(status) {
+            if (!status) return '';
+            return status.replace(/_/g, ' ');
+        }
+
+        // Utility: Format date/time
+        function formatDateTime(dateStr) {
+            if (!dateStr) return 'N/A';
+            try {
+                const date = new Date(dateStr);
+                return date.toLocaleDateString('en-US', {
+                    year: 'numeric',
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+            } catch {
+                return dateStr;
+            }
+        }
+
+        // Utility: Format relative time
+        function formatRelativeTime(dateStr) {
+            if (!dateStr) return '';
+            try {
+                const date = new Date(dateStr);
+                const now = new Date();
+                const diffMs = now - date;
+                const diffMins = Math.floor(diffMs / 60000);
+                const diffHours = Math.floor(diffMs / 3600000);
+                const diffDays = Math.floor(diffMs / 86400000);
+
+                if (diffMins < 1) return 'Just now';
+                if (diffMins < 60) return `${diffMins}m ago`;
+                if (diffHours < 24) return `${diffHours}h ago`;
+                if (diffDays < 7) return `${diffDays}d ago`;
+
+                return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            } catch {
+                return dateStr;
+            }
+        }
+
+        // Create element with classes
+        function createElement(tag, classes = [], textContent = null) {
+            const el = document.createElement(tag);
+            if (classes.length) el.classList.add(...classes);
+            if (textContent !== null) el.textContent = textContent;
+            return el;
+        }
+
+        // Render task data into panel using safe DOM methods
+        function renderTaskPanel(task) {
+            // Header
+            document.getElementById('taskId').textContent = task.id;
+            document.getElementById('taskTitle').textContent = task.title;
+
+            // Badges
+            const badgesContainer = document.getElementById('taskBadges');
+            badgesContainer.replaceChildren();
+
+            const statusBadge = createElement('span', ['badge', `badge-status-${task.status}`], formatStatus(task.status));
+            badgesContainer.appendChild(statusBadge);
+
+            if (task.priority) {
+                const priorityBadge = createElement('span', ['badge', `badge-priority-${task.priority}`], `${task.priority} priority`);
+                badgesContainer.appendChild(priorityBadge);
+            }
+
+            // Content sections
+            taskPanelContent.replaceChildren();
+
+            // Description section
+            if (task.description || task.context_summary) {
+                const section = createElement('div', ['task-section']);
+                const title = createElement('h3', ['section-title'], 'Description');
+                section.appendChild(title);
+
+                const descBox = createElement('div', ['description-box']);
+
+                if (task.description) {
+                    const descText = createElement('div', ['description-text'], task.description);
+                    descBox.appendChild(descText);
+                }
+
+                if (task.context_summary) {
+                    const contextDiv = createElement('div', ['context-summary']);
+                    const contextLabel = createElement('div', ['context-label'], 'Context / Last Session');
+                    const contextText = createElement('div', ['context-text'], task.context_summary);
+                    contextDiv.appendChild(contextLabel);
+                    contextDiv.appendChild(contextText);
+                    descBox.appendChild(contextDiv);
+                }
+
+                section.appendChild(descBox);
+                taskPanelContent.appendChild(section);
+            }
+
+            // Files section
+            if (task.working_files && task.working_files.length > 0) {
+                const section = createElement('div', ['task-section']);
+                const title = createElement('h3', ['section-title'], 'Working Files');
+                section.appendChild(title);
+
+                const filesList = createElement('div', ['files-list']);
+
+                task.working_files.forEach(filePath => {
+                    const fileItem = createElement('div', ['file-item']);
+                    fileItem.appendChild(createSvgIcon('file'));
+
+                    const pathSpan = createElement('span', ['file-path'], filePath);
+                    fileItem.appendChild(pathSpan);
+                    fileItem.appendChild(createSvgIcon('copy'));
+
+                    fileItem.addEventListener('click', () => copyToClipboard(filePath, fileItem));
+                    filesList.appendChild(fileItem);
+                });
+
+                section.appendChild(filesList);
+                taskPanelContent.appendChild(section);
+            }
+
+            // Dependencies section
+            const hasBlockers = task.blockers && task.blockers.length > 0;
+            const hasBlockedTasks = task.blocked_tasks && task.blocked_tasks.length > 0;
+
+            if (hasBlockers || hasBlockedTasks) {
+                const section = createElement('div', ['task-section']);
+                const title = createElement('h3', ['section-title'], 'Dependencies');
+                section.appendChild(title);
+
+                const grid = createElement('div', ['dependencies-grid']);
+
+                // Blocked by column
+                const blockedByCol = createElement('div', ['dependency-column']);
+                const blockedByLabel = createElement('div', ['dependency-label', 'blocked-by'], 'Blocked By');
+                blockedByCol.appendChild(blockedByLabel);
+
+                const blockedByList = createElement('div', ['dependency-list']);
+                if (hasBlockers) {
+                    task.blockers.forEach(blocker => {
+                        const item = createElement('div', ['dependency-item'], blocker.description);
+                        blockedByList.appendChild(item);
+                    });
+                } else {
+                    const empty = createElement('div', ['dependency-empty'], 'None');
+                    blockedByList.appendChild(empty);
+                }
+                blockedByCol.appendChild(blockedByList);
+                grid.appendChild(blockedByCol);
+
+                // Blocks column
+                const blocksCol = createElement('div', ['dependency-column']);
+                const blocksLabel = createElement('div', ['dependency-label', 'blocks'], 'Blocks');
+                blocksCol.appendChild(blocksLabel);
+
+                const blocksList = createElement('div', ['dependency-list']);
+                if (hasBlockedTasks) {
+                    task.blocked_tasks.forEach(t => {
+                        const item = createElement('div', ['dependency-item']);
+                        const code = createElement('code', [], t.id);
+                        item.appendChild(code);
+                        item.appendChild(document.createTextNode(` ${t.title}`));
+                        blocksList.appendChild(item);
+                    });
+                } else {
+                    const empty = createElement('div', ['dependency-empty'], 'None');
+                    blocksList.appendChild(empty);
+                }
+                blocksCol.appendChild(blocksList);
+                grid.appendChild(blocksCol);
+
+                section.appendChild(grid);
+                taskPanelContent.appendChild(section);
+            }
+
+            // Activity section
+            if (task.activity && task.activity.length > 0) {
+                const section = createElement('div', ['task-section']);
+                const title = createElement('h3', ['section-title'], 'Activity');
+                section.appendChild(title);
+
+                const timeline = createElement('div', ['activity-timeline']);
+
+                const typeLabels = {
+                    note: 'Note added',
+                    status_change: 'Status changed',
+                    file_added: 'File added',
+                    file_removed: 'File removed',
+                    blocker_added: 'Blocker added',
+                    blocker_resolved: 'Blocker resolved',
+                    created: 'Task created'
+                };
+
+                task.activity.forEach(item => {
+                    const activityItem = createElement('div', ['activity-item']);
+
+                    const iconWrapper = createElement('div', ['activity-icon-wrapper', item.event_type]);
+                    iconWrapper.appendChild(createSvgIcon(item.event_type));
+                    activityItem.appendChild(iconWrapper);
+
+                    const content = createElement('div', ['activity-content']);
+
+                    const header = createElement('div', ['activity-header']);
+                    const typeSpan = createElement('span', ['activity-type'], typeLabels[item.event_type] || item.event_type);
+                    const timeSpan = createElement('span', ['activity-time'], formatRelativeTime(item.created_at));
+                    header.appendChild(typeSpan);
+                    header.appendChild(timeSpan);
+                    content.appendChild(header);
+
+                    const desc = createElement('div', ['activity-description']);
+
+                    switch (item.event_type) {
+                        case 'note':
+                            desc.textContent = item.event_data.content || '';
+                            break;
+                        case 'status_change': {
+                            const fromCode = createElement('code', [], formatStatus(item.event_data.from));
+                            const toCode = createElement('code', [], formatStatus(item.event_data.to));
+                            desc.appendChild(fromCode);
+                            desc.appendChild(document.createTextNode(' \u2192 '));
+                            desc.appendChild(toCode);
+                            break;
+                        }
+                        case 'file_added':
+                        case 'file_removed': {
+                            const fileCode = createElement('code', [], item.event_data.file_path || '');
+                            desc.appendChild(fileCode);
+                            break;
+                        }
+                        case 'blocker_added':
+                        case 'blocker_resolved':
+                            desc.textContent = item.event_data.description || '';
+                            break;
+                        case 'created':
+                            desc.textContent = 'Task was created';
+                            break;
+                        default:
+                            desc.textContent = JSON.stringify(item.event_data);
+                    }
+
+                    content.appendChild(desc);
+                    activityItem.appendChild(content);
+                    timeline.appendChild(activityItem);
+                });
+
+                section.appendChild(timeline);
+                taskPanelContent.appendChild(section);
+            }
+
+            // Footer metadata
+            const metadataGrid = document.getElementById('metadataGrid');
+            metadataGrid.replaceChildren();
+
+            const addMetadataItem = (label, value) => {
+                const item = createElement('div', ['metadata-item']);
+                const labelEl = createElement('span', ['metadata-label'], label);
+                const valueEl = createElement('span', ['metadata-value'], value);
+                item.appendChild(labelEl);
+                item.appendChild(valueEl);
+                metadataGrid.appendChild(item);
+            };
+
+            addMetadataItem('Created', formatDateTime(task.created_at));
+            addMetadataItem('Updated', formatDateTime(task.updated_at));
+            if (task.created_by) addMetadataItem('Created By', task.created_by);
+            if (task.assigned_to) addMetadataItem('Assigned To', task.assigned_to);
+        }
+
+        // Copy to clipboard
+        async function copyToClipboard(text, element) {
+            try {
+                await navigator.clipboard.writeText(text);
+
+                // Visual feedback on element
+                if (element) {
+                    element.classList.add('copied');
+                    setTimeout(() => element.classList.remove('copied'), 1500);
+                }
+
+                // Show toast
+                showToast('Copied to clipboard');
+            } catch (err) {
+                console.error('Failed to copy:', err);
+                showToast('Failed to copy');
+            }
+        }
+
+        // Show toast notification
+        function showToast(message) {
+            toast.textContent = message;
+            toast.classList.add('visible');
+
+            if (toastTimeout) {
+                clearTimeout(toastTimeout);
+            }
+
+            toastTimeout = setTimeout(() => {
+                toast.classList.remove('visible');
+            }, 2000);
+        }
+
+        // Event Listeners
+        taskPanelBackdrop.addEventListener('click', closeTaskPanel);
+        taskPanelClose.addEventListener('click', closeTaskPanel);
+
+        document.getElementById('openPanelBtn').addEventListener('click', () => {
+            openTaskPanel(sampleTask);
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && isOpen) {
+                closeTaskPanel();
+            }
+        });
+
+        // Expose functions globally for external use
+        window.openTaskPanel = openTaskPanel;
+        window.closeTaskPanel = closeTaskPanel;
+    </script>
+</body>
+</html>
