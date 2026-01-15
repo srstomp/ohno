@@ -1,6 +1,6 @@
 {
-  "name": "ohno-cli",
-  "version": "0.5.0",
+  "name": "@stevestomp/ohno-cli",
+  "version": "0.5.1",
   "description": "Task management CLI for AI agents and humans with visual kanban board",
   "author": "stevestomp",
   "repository": {
@@ -20,6 +20,10 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "!dist/**/*.test.*"
+  ],
   "bin": {
     "ohno": "./dist/index.js"
   },
@@ -36,7 +40,7 @@
     "chalk": "^5.4.0",
     "chokidar": "^4.0.0",
     "commander": "^12.1.0",
-    "ohno-core": "*"
+    "@stevestomp/ohno-core": "*"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

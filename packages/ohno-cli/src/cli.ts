@@ -9,7 +9,7 @@ import {
   findOhnoDir,
   ensureOhnoDir,
   type TaskStatus,
-} from "ohno-core";
+} from "@stevestomp/ohno-core";
 import { out, formatTask, formatStatus, formatPriority, colors } from "./output.js";
 import { startServer, syncKanban } from "./server.js";
 

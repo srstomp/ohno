@@ -461,7 +461,7 @@ describe("TaskDatabase", () => {
         expect(next).toBeDefined();
       });
 
-      it("should not return in-progress or done tasks", () => {
+      it("should prioritize in_progress tasks over todo tasks", () => {
         const doneId = db.createTask({ title: "Done" });
         db.updateTaskStatus(doneId, "done");
 
@@ -471,8 +471,21 @@ describe("TaskDatabase", () => {
         db.createTask({ title: "Todo" });
 
         const next = db.getNextTask();
-        // Should return a todo task (not in_progress or done)
+        // Should return the in_progress task first (to encourage continuing work)
+        expect(next?.status).toBe("in_progress");
+        expect(next?.id).toBe(progressId);
+      });
+
+      it("should return todo task when no in_progress tasks exist", () => {
+        const doneId = db.createTask({ title: "Done" });
+        db.updateTaskStatus(doneId, "done");
+
+        const todoId = db.createTask({ title: "Todo" });
+
+        const next = db.getNextTask();
+        // Should return the todo task when no in_progress exists
         expect(next?.status).toBe("todo");
+        expect(next?.id).toBe(todoId);
       });
 
       it("should return null when no tasks available", () => {
