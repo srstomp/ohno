@@ -1,18 +1,28 @@
 #!/usr/bin/env python3
 """
-Ohno - Visual Kanban Board CLI
+Ohno - Task Management CLI for AI Agents and Humans
 
-A standalone tool for visualizing and serving a kanban board from tasks.db.
+A CLI tool for task management with visual kanban board.
 
-Usage:
-    ohno serve [--port 3333]    # HTTP server + watch + auto-sync
-    ohno sync                   # One-time sync
-    ohno status                 # Show project stats
-    ohno init                   # Initialize .ohno/ folder
+Visualization Commands:
+    ohno serve              # HTTP server + watch + auto-sync
+    ohno sync               # One-time kanban sync
+    ohno status             # Show project stats
+    ohno init               # Initialize .ohno/ folder
+
+Task Management Commands:
+    ohno tasks              # List tasks
+    ohno task <id>          # Get task details
+    ohno create "title"     # Create a task
+    ohno start <id>         # Start working on task
+    ohno done <id>          # Mark task as done
+    ohno block <id> "why"   # Set blocker
+    ohno dep add <a> <b>    # Add dependency
+    ohno context            # Get session context (AI agents)
+    ohno next               # Get next recommended task
 
 The tool watches tasks.db for changes and automatically regenerates kanban.html.
-Skills and manual sqlite3 commands don't need to know about syncing - just modify
-the database and the watcher handles the rest.
+Works with any AI agent that has shell access (Claude, GPT, Gemini, etc.)
 
 Installation:
     pip install git+https://github.com/srstomp/ohno.git#subdirectory=ohno-cli
@@ -768,6 +778,334 @@ def cmd_version(args):
 
 
 # ============================================================================
+# Task Management Commands (for AI agents and humans)
+# ============================================================================
+
+
+def _get_task_db(args):
+    """Get TaskDatabase instance."""
+    # Import here to avoid hard dependency if not using task commands
+    try:
+        # Try importing from ohno_mcp (if installed)
+        from ohno_mcp.db import TaskDatabase
+    except ImportError:
+        # Fallback: inline minimal implementation
+        out.error(
+            "ohno-mcp not installed",
+            "Task commands require ohno-mcp package",
+            ["pip install git+https://github.com/srstomp/ohno.git#subdirectory=ohno-mcp"],
+        )
+        sys.exit(EXIT_CONFIG)
+
+    ohno_dir = find_ohno_dir(args.dir)
+    db_path = get_db_path(ohno_dir)
+
+    if not db_path.exists():
+        out.error(
+            f"Database not found: {db_path}",
+            "No tasks.db file exists",
+            ["Run prd-analyzer to create tasks", "ohno init"],
+        )
+        sys.exit(EXIT_DATABASE)
+
+    return TaskDatabase(db_path)
+
+
+def cmd_tasks(args):
+    """List tasks with optional filtering."""
+    global out
+    out = Output(quiet=args.quiet, json_mode=args.json, no_color=args.no_color)
+
+    db = _get_task_db(args)
+    tasks = db.get_tasks(
+        status=args.status,
+        priority=args.priority,
+        limit=args.limit,
+    )
+
+    if args.json:
+        out.json_output({"tasks": [t.to_dict() for t in tasks]})
+        return
+
+    if not tasks:
+        out.info("No tasks found")
+        return
+
+    # Group by status for display
+    print()
+    for task in tasks:
+        status_color = {
+            "done": out.green,
+            "in_progress": out.blue,
+            "blocked": out.red,
+            "review": out.yellow,
+        }.get(task.status, lambda x: x)
+
+        status_str = status_color(f"[{task.status}]")
+        priority_str = f"({task.epic_priority})" if task.epic_priority else ""
+        progress_str = f" {task.progress_percent}%" if task.progress_percent else ""
+
+        print(f"{task.id} {status_str} {task.title} {priority_str}{progress_str}")
+
+    print(f"\n{len(tasks)} task(s)")
+
+
+def cmd_task(args):
+    """Get details for a specific task."""
+    global out
+    out = Output(quiet=args.quiet, json_mode=args.json, no_color=args.no_color)
+
+    db = _get_task_db(args)
+    task = db.get_task(args.task_id)
+
+    if not task:
+        out.error(f"Task not found: {args.task_id}")
+        sys.exit(EXIT_ERROR)
+
+    if args.json:
+        # Include dependencies and activity
+        deps = db.get_task_dependencies(args.task_id)
+        activity = db.get_task_activity(args.task_id, limit=10)
+        out.json_output({
+            "task": task.to_dict(),
+            "dependencies": [d.to_dict() for d in deps],
+            "activity": [a.to_dict() for a in activity],
+        })
+        return
+
+    # Human-readable output
+    print()
+    print(out.blue(f"Task: {task.id}"))
+    print("=" * 50)
+    print(f"Title:    {task.title}")
+    print(f"Status:   {task.status}")
+    print(f"Type:     {task.task_type or '-'}")
+    print(f"Priority: {task.epic_priority or '-'}")
+    print(f"Progress: {task.progress_percent or 0}%")
+
+    if task.description:
+        print(f"\nDescription:\n  {task.description[:200]}{'...' if len(task.description or '') > 200 else ''}")
+
+    if task.blockers:
+        print(f"\n{out.red('Blockers:')} {task.blockers}")
+
+    if task.handoff_notes:
+        print(f"\nHandoff Notes:\n  {task.handoff_notes}")
+
+    # Show dependencies
+    deps = db.get_task_dependencies(args.task_id)
+    if deps:
+        print(f"\nDependencies:")
+        for d in deps:
+            status_icon = out.green("✓") if d.depends_on_status == "done" else out.yellow("○")
+            print(f"  {status_icon} {d.depends_on_task_id}: {d.depends_on_title or 'Unknown'}")
+
+    print()
+
+
+def cmd_create(args):
+    """Create a new task."""
+    global out
+    out = Output(quiet=args.quiet, json_mode=args.json, no_color=args.no_color)
+
+    db = _get_task_db(args)
+    task_id = db.create_task(
+        title=args.title,
+        task_type=args.type,
+        description=args.description,
+        estimate_hours=args.estimate,
+    )
+
+    if task_id:
+        if args.json:
+            out.json_output({"success": True, "task_id": task_id})
+        else:
+            out.success(f"Created task: {task_id}")
+    else:
+        out.error("Failed to create task")
+        sys.exit(EXIT_ERROR)
+
+
+def cmd_update_status(args):
+    """Update task status (start, done, review, todo)."""
+    global out
+    out = Output(quiet=args.quiet, json_mode=args.json, no_color=args.no_color)
+
+    db = _get_task_db(args)
+    success = db.update_task_status(args.task_id, args.status, args.notes)
+
+    if success:
+        if args.json:
+            out.json_output({"success": True, "task_id": args.task_id, "status": args.status})
+        else:
+            out.success(f"{args.task_id} -> {args.status}")
+    else:
+        out.error(f"Failed to update task {args.task_id}")
+        sys.exit(EXIT_ERROR)
+
+
+def cmd_block(args):
+    """Mark task as blocked."""
+    global out
+    out = Output(quiet=args.quiet, json_mode=args.json, no_color=args.no_color)
+
+    db = _get_task_db(args)
+    success = db.set_blocker(args.task_id, args.reason)
+
+    if success:
+        if args.json:
+            out.json_output({"success": True, "task_id": args.task_id, "blocked": True})
+        else:
+            out.success(f"{args.task_id} blocked: {args.reason}")
+    else:
+        out.error(f"Failed to block task {args.task_id}")
+        sys.exit(EXIT_ERROR)
+
+
+def cmd_unblock(args):
+    """Resolve blocker on task."""
+    global out
+    out = Output(quiet=args.quiet, json_mode=args.json, no_color=args.no_color)
+
+    db = _get_task_db(args)
+    success = db.resolve_blocker(args.task_id)
+
+    if success:
+        if args.json:
+            out.json_output({"success": True, "task_id": args.task_id, "blocked": False})
+        else:
+            out.success(f"{args.task_id} unblocked")
+    else:
+        out.error(f"Failed to unblock task {args.task_id}")
+        sys.exit(EXIT_ERROR)
+
+
+def cmd_dep(args):
+    """Manage task dependencies."""
+    global out
+    out = Output(quiet=args.quiet, json_mode=args.json, no_color=args.no_color)
+
+    db = _get_task_db(args)
+
+    if args.dep_action == "add":
+        dep_id = db.add_dependency(args.task_id, args.depends_on)
+        if dep_id:
+            if args.json:
+                out.json_output({"success": True, "dependency_id": dep_id})
+            else:
+                out.success(f"{args.task_id} now depends on {args.depends_on}")
+        else:
+            out.error("Failed to add dependency (tasks may not exist or self-reference)")
+            sys.exit(EXIT_ERROR)
+
+    elif args.dep_action == "rm":
+        success = db.remove_dependency(args.task_id, args.depends_on)
+        if success:
+            if args.json:
+                out.json_output({"success": True})
+            else:
+                out.success(f"Removed dependency: {args.task_id} -> {args.depends_on}")
+        else:
+            out.error("Dependency not found")
+            sys.exit(EXIT_ERROR)
+
+    elif args.dep_action == "list":
+        deps = db.get_task_dependencies(args.task_id)
+        blocking = db.get_blocking_dependencies(args.task_id)
+
+        if args.json:
+            out.json_output({
+                "dependencies": [d.to_dict() for d in deps],
+                "blocking": blocking,
+                "is_blocked": len(blocking) > 0,
+            })
+        else:
+            if not deps:
+                out.info(f"{args.task_id} has no dependencies")
+            else:
+                print(f"\nDependencies for {args.task_id}:")
+                for d in deps:
+                    status_icon = out.green("✓") if d.depends_on_status == "done" else out.red("○")
+                    print(f"  {status_icon} {d.depends_on_task_id} [{d.depends_on_status}]")
+                if blocking:
+                    print(f"\n{out.red('Blocked by:')} {', '.join(blocking)}")
+                print()
+
+
+def cmd_context(args):
+    """Get session context (for AI agents resuming work)."""
+    global out
+    out = Output(quiet=args.quiet, json_mode=args.json, no_color=args.no_color)
+
+    db = _get_task_db(args)
+    ctx = db.get_session_context()
+
+    if args.json:
+        out.json_output(ctx.to_dict())
+        return
+
+    # Human-readable
+    print()
+    print(out.blue("SESSION CONTEXT"))
+    print("=" * 50)
+
+    if ctx.in_progress_tasks:
+        print(f"\n{out.blue('In Progress:')} ({len(ctx.in_progress_tasks)})")
+        for t in ctx.in_progress_tasks:
+            progress = f" {t.get('progress_percent', 0)}%" if t.get('progress_percent') else ""
+            print(f"  {t['id']}: {t['title']}{progress}")
+
+    if ctx.blocked_tasks:
+        print(f"\n{out.red('Blocked:')} ({len(ctx.blocked_tasks)})")
+        for t in ctx.blocked_tasks:
+            print(f"  {t['id']}: {t['title']}")
+            if t.get('blockers'):
+                print(f"    Reason: {t['blockers']}")
+
+    if ctx.suggested_next_task:
+        t = ctx.suggested_next_task
+        print(f"\n{out.green('Suggested Next Task:')}")
+        print(f"  {t['id']}: {t['title']}")
+        if t.get('epic_priority'):
+            print(f"  Priority: {t['epic_priority']}")
+
+    if ctx.recent_activity:
+        print(f"\n{out.dim('Recent Activity:')} ({len(ctx.recent_activity)})")
+        for a in ctx.recent_activity[:5]:
+            print(f"  [{a.get('activity_type')}] {a.get('task_title', a.get('task_id'))}")
+
+    print()
+
+
+def cmd_next(args):
+    """Get the next recommended task to work on."""
+    global out
+    out = Output(quiet=args.quiet, json_mode=args.json, no_color=args.no_color)
+
+    db = _get_task_db(args)
+    task = db.get_next_task()
+
+    if not task:
+        if args.json:
+            out.json_output({"message": "No tasks available"})
+        else:
+            out.info("No tasks available to work on")
+        return
+
+    if args.json:
+        out.json_output({"task": task.to_dict()})
+    else:
+        print(f"\n{out.green('Next task:')}")
+        print(f"  ID:       {task.id}")
+        print(f"  Title:    {task.title}")
+        print(f"  Status:   {task.status}")
+        print(f"  Priority: {task.epic_priority or '-'}")
+        if task.handoff_notes:
+            print(f"  Notes:    {task.handoff_notes}")
+        print()
+
+
+# ============================================================================
 # Main
 # ============================================================================
 
@@ -784,6 +1122,20 @@ Examples:
   ohno status             Show project stats
   ohno status --json      Machine-readable output
   ohno init               Initialize .ohno/ folder
+
+Task Management:
+  ohno tasks              List all tasks
+  ohno tasks -s todo      List todo tasks
+  ohno task task-abc123   Get task details
+  ohno create "Fix bug"   Create a new task
+  ohno start task-abc     Start working on task
+  ohno done task-abc      Mark task as done
+  ohno block task-abc "waiting for API"
+  ohno unblock task-abc
+  ohno dep add task-b task-a   task-b depends on task-a
+  ohno dep list task-b         Show dependencies
+  ohno context            Get session context (AI agents)
+  ohno next               Get next recommended task
 
 Environment Variables:
   OHNO_PORT               Default port (default: 3333)
@@ -829,6 +1181,83 @@ Environment Variables:
     version_parser = subparsers.add_parser("version", help="Show version information")
     version_parser.add_argument("--json", "-j", action="store_true", help="Output as JSON")
 
+    # ========================================================================
+    # Task Management Commands
+    # ========================================================================
+
+    # tasks - list tasks
+    tasks_parser = subparsers.add_parser("tasks", help="List tasks")
+    tasks_parser.add_argument("--status", "-s", type=str, help="Filter by status (todo, in_progress, done, blocked, review)")
+    tasks_parser.add_argument("--priority", "-p", type=str, help="Filter by priority (P0, P1, P2, P3)")
+    tasks_parser.add_argument("--limit", "-l", type=int, default=50, help="Max tasks to return (default: 50)")
+    tasks_parser.add_argument("--json", "-j", action="store_true", help="Output as JSON")
+
+    # task - get single task
+    task_parser = subparsers.add_parser("task", help="Get task details")
+    task_parser.add_argument("task_id", type=str, help="Task ID (e.g., task-abc123)")
+    task_parser.add_argument("--json", "-j", action="store_true", help="Output as JSON")
+
+    # create - create task
+    create_parser = subparsers.add_parser("create", help="Create a new task")
+    create_parser.add_argument("title", type=str, help="Task title")
+    create_parser.add_argument("--type", "-t", type=str, default="feature", help="Task type (feature, bug, chore, spike, test)")
+    create_parser.add_argument("--description", "-D", type=str, help="Task description")
+    create_parser.add_argument("--estimate", "-e", type=float, help="Estimate in hours")
+    create_parser.add_argument("--json", "-j", action="store_true", help="Output as JSON")
+
+    # start - mark task in_progress
+    start_parser = subparsers.add_parser("start", help="Start working on a task")
+    start_parser.add_argument("task_id", type=str, help="Task ID")
+    start_parser.add_argument("--notes", "-n", type=str, help="Optional notes")
+    start_parser.add_argument("--json", "-j", action="store_true", help="Output as JSON")
+
+    # done - mark task done
+    done_parser = subparsers.add_parser("done", help="Mark task as done")
+    done_parser.add_argument("task_id", type=str, help="Task ID")
+    done_parser.add_argument("--notes", "-n", type=str, help="Optional notes")
+    done_parser.add_argument("--json", "-j", action="store_true", help="Output as JSON")
+
+    # review - mark task for review
+    review_parser = subparsers.add_parser("review", help="Mark task for review")
+    review_parser.add_argument("task_id", type=str, help="Task ID")
+    review_parser.add_argument("--notes", "-n", type=str, help="Optional notes")
+    review_parser.add_argument("--json", "-j", action="store_true", help="Output as JSON")
+
+    # block - set blocker
+    block_parser = subparsers.add_parser("block", help="Mark task as blocked")
+    block_parser.add_argument("task_id", type=str, help="Task ID")
+    block_parser.add_argument("reason", type=str, help="Blocker reason")
+    block_parser.add_argument("--json", "-j", action="store_true", help="Output as JSON")
+
+    # unblock - resolve blocker
+    unblock_parser = subparsers.add_parser("unblock", help="Resolve blocker")
+    unblock_parser.add_argument("task_id", type=str, help="Task ID")
+    unblock_parser.add_argument("--json", "-j", action="store_true", help="Output as JSON")
+
+    # dep - dependency management
+    dep_parser = subparsers.add_parser("dep", help="Manage task dependencies")
+    dep_parser.add_argument("--json", "-j", action="store_true", help="Output as JSON")
+    dep_subparsers = dep_parser.add_subparsers(dest="dep_action", help="Dependency action")
+
+    dep_add = dep_subparsers.add_parser("add", help="Add dependency")
+    dep_add.add_argument("task_id", type=str, help="Task that has the dependency")
+    dep_add.add_argument("depends_on", type=str, help="Task that must be done first")
+
+    dep_rm = dep_subparsers.add_parser("rm", help="Remove dependency")
+    dep_rm.add_argument("task_id", type=str, help="Task that has the dependency")
+    dep_rm.add_argument("depends_on", type=str, help="Task to remove from dependencies")
+
+    dep_list = dep_subparsers.add_parser("list", help="List dependencies")
+    dep_list.add_argument("task_id", type=str, help="Task to list dependencies for")
+
+    # context - session context for AI agents
+    context_parser = subparsers.add_parser("context", help="Get session context (for AI agents)")
+    context_parser.add_argument("--json", "-j", action="store_true", help="Output as JSON")
+
+    # next - get next recommended task
+    next_parser = subparsers.add_parser("next", help="Get next recommended task")
+    next_parser.add_argument("--json", "-j", action="store_true", help="Output as JSON")
+
     args = parser.parse_args()
 
     # Handle --version flag
@@ -847,6 +1276,36 @@ Environment Variables:
         cmd_init(args)
     elif args.command == "version":
         cmd_version(args)
+    # Task management commands
+    elif args.command == "tasks":
+        cmd_tasks(args)
+    elif args.command == "task":
+        cmd_task(args)
+    elif args.command == "create":
+        cmd_create(args)
+    elif args.command == "start":
+        args.status = "in_progress"
+        cmd_update_status(args)
+    elif args.command == "done":
+        args.status = "done"
+        cmd_update_status(args)
+    elif args.command == "review":
+        args.status = "review"
+        cmd_update_status(args)
+    elif args.command == "block":
+        cmd_block(args)
+    elif args.command == "unblock":
+        cmd_unblock(args)
+    elif args.command == "dep":
+        if args.dep_action:
+            cmd_dep(args)
+        else:
+            out.error("Missing dependency action", "", ["ohno dep add <task> <depends-on>", "ohno dep rm <task> <depends-on>", "ohno dep list <task>"])
+            sys.exit(EXIT_USAGE)
+    elif args.command == "context":
+        cmd_context(args)
+    elif args.command == "next":
+        cmd_next(args)
     else:
         # Default to serve if no command specified
         # Need to add serve-specific defaults
