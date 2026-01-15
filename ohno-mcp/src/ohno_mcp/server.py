@@ -564,6 +564,133 @@ def archive_task(task_id: str, reason: str = "") -> dict:
 
 
 # =============================================================================
+# Dependency Management Tools
+# =============================================================================
+
+
+@mcp.tool()
+def add_dependency(
+    task_id: str,
+    depends_on_task_id: str,
+    dependency_type: str = "blocks",
+) -> dict:
+    """
+    Add a dependency between tasks.
+
+    The task specified by task_id will depend on depends_on_task_id,
+    meaning task_id cannot be suggested until depends_on_task_id is done.
+
+    This affects get_session_context() and get_next_task() - they will
+    skip tasks whose dependencies aren't completed.
+
+    Args:
+        task_id: The task that has the dependency
+        depends_on_task_id: The task that must be completed first
+        dependency_type: Type of dependency - blocks (default), requires, relates_to
+
+    Returns:
+        {"success": true, "dependency_id": "dep-xxx"} or {"success": false, "error": "..."}
+
+    Example:
+        add_dependency("task-20", "task-15")  # task-20 depends on task-15
+    """
+    if dependency_type not in ("blocks", "requires", "relates_to"):
+        return {"success": False, "error": f"Invalid dependency_type: {dependency_type}"}
+
+    db = get_db()
+    dep_id = db.add_dependency(task_id, depends_on_task_id, dependency_type)
+
+    if dep_id:
+        return {"success": True, "dependency_id": dep_id}
+    return {"success": False, "error": "Failed to add dependency (tasks may not exist or self-reference)"}
+
+
+@mcp.tool()
+def remove_dependency(task_id: str, depends_on_task_id: str) -> dict:
+    """
+    Remove a dependency between tasks.
+
+    Args:
+        task_id: The task that has the dependency
+        depends_on_task_id: The task being depended on
+
+    Returns:
+        {"success": true} or {"success": false, "error": "..."}
+    """
+    db = get_db()
+    success = db.remove_dependency(task_id, depends_on_task_id)
+
+    if success:
+        return {"success": True}
+    return {"success": False, "error": "Dependency not found"}
+
+
+@mcp.tool()
+def get_task_dependencies(task_id: str) -> dict:
+    """
+    Get all dependencies for a task.
+
+    Returns tasks that must be completed before this task can start.
+    Also indicates which dependencies are currently blocking the task.
+
+    Args:
+        task_id: The task to get dependencies for
+
+    Returns:
+        dict with:
+        - dependencies: list of dependency objects with task details
+        - blocking: list of task IDs that are not yet done (blocking this task)
+        - is_blocked: boolean indicating if any dependencies are unfinished
+
+    Example response:
+        {
+            "dependencies": [
+                {"depends_on_task_id": "task-15", "depends_on_title": "Setup auth", "depends_on_status": "done"},
+                {"depends_on_task_id": "task-18", "depends_on_title": "Add DB schema", "depends_on_status": "in_progress"}
+            ],
+            "blocking": ["task-18"],
+            "is_blocked": true
+        }
+    """
+    db = get_db()
+    deps = db.get_task_dependencies(task_id)
+    blocking = db.get_blocking_dependencies(task_id)
+
+    return {
+        "dependencies": [dep.to_dict() for dep in deps],
+        "blocking": blocking,
+        "is_blocked": len(blocking) > 0,
+    }
+
+
+@mcp.tool()
+def summarize_task_activity(task_id: str, delete_raw: bool = False) -> dict:
+    """
+    Summarize task activity into a compact format.
+
+    This compresses N activity entries into a summary stored on the task.
+    Useful for long-running tasks with lots of activity to reduce context size.
+
+    Args:
+        task_id: The task to summarize
+        delete_raw: If True, delete old activity entries after summarization
+                   (keeps last 3 entries for recent context)
+
+    Returns:
+        {"success": true, "summary": "..."} or {"success": false, "error": "..."}
+
+    Note: Automatically called when a task is marked as done or archived.
+          Use this manually for long-running in_progress tasks.
+    """
+    db = get_db()
+    summary = db.summarize_task_activity(task_id, delete_raw=delete_raw)
+
+    if summary:
+        return {"success": True, "summary": summary}
+    return {"success": False, "error": "Insufficient activity to summarize (need 5+ entries)"}
+
+
+# =============================================================================
 # Entry Point
 # =============================================================================
 
