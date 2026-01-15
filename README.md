@@ -15,35 +15,49 @@ The agent forgets what it was working on, what's done, and what's blocked.
 
 ## The Solution
 
-Ohno provides two tools that share a common task database:
+Ohno provides multiple integration options:
 
 | Tool | Purpose | Consumer |
 |------|---------|----------|
-| **ohno-mcp** | Query/update task state | AI agents (via MCP) |
-| **kanban.py** | Visual kanban board | Humans (via browser) |
+| **ohno-mcp** | Query/update task state via MCP | Claude Code |
+| **ohno-cli** | Query/update task state via shell | Any AI agent, humans |
+| **ohno serve** | Visual kanban board | Humans (via browser) |
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                      Claude Code                             │
-│                                                              │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │                    ohno-mcp                           │   │
-│  │                                                       │   │
-│  │  get_session_context()  ← Resume after compaction    │   │
-│  │  update_task_status()   ← Mark done/in_progress      │   │
-│  │  set_handoff_notes()    ← Leave notes for next       │   │
-│  └───────────────────────────┬──────────────────────────┘   │
-│                              │                               │
-└──────────────────────────────┼───────────────────────────────┘
-                               │ read/write
-                  ┌────────────┴────────────┐
-                  │    .ohno/tasks.db       │
-                  └────────────┬────────────┘
-                               │ read + watch
-                  ┌────────────┴────────────┐
-                  │      kanban.py          │  → browser (human)
-                  └─────────────────────────┘
+│                  Any AI Agent                               │
+│         (Claude, GPT, Gemini, LangChain, etc.)              │
+│                                                             │
+│    ┌─────────────────┐         ┌─────────────────┐          │
+│    │    ohno-mcp     │         │    ohno-cli     │          │
+│    │   (MCP tools)   │         │  (shell cmds)   │          │
+│    └────────┬────────┘         └────────┬────────┘          │
+│             │                           │                   │
+└─────────────┼───────────────────────────┼───────────────────┘
+              │                           │
+              └─────────────┬─────────────┘
+                            │ read/write
+               ┌────────────┴────────────┐
+               │    .ohno/tasks.db       │
+               └────────────┬────────────┘
+                            │ read + watch
+               ┌────────────┴────────────┐
+               │      ohno serve         │  → browser (human)
+               └─────────────────────────┘
 ```
+
+## Integration Capabilities
+
+| Platform | Integration Method |
+|----------|-------------------|
+| **Claude Code** | MCP Server (native tools) |
+| **Claude Marketplace** | MCP Server (ready to publish) |
+| **ChatGPT / GPT-4** | CLI via shell/subprocess |
+| **Google Gemini** | CLI via shell/subprocess |
+| **Local LLMs** | CLI via shell/subprocess |
+| **LangChain / LlamaIndex** | CLI via subprocess wrapper |
+| **CI/CD pipelines** | CLI with `--json` output |
+| **Human developers** | CLI + visual kanban board |
 
 ## Quick Start
 
@@ -159,7 +173,7 @@ Run `ohno serve` to view tasks at http://localhost:3333/kanban.html
 
 ## Ohno CLI Reference
 
-### Commands
+### Visualization Commands
 
 ```bash
 ohno serve              # Start visual board server
@@ -170,12 +184,41 @@ ohno sync               # One-time HTML generation (for CI/CD)
 ohno init               # Initialize .ohno/ folder
 ```
 
+### Task Management Commands
+
+```bash
+# List and view tasks
+ohno tasks                      # List all tasks
+ohno tasks -s todo              # Filter by status
+ohno tasks -p P0 --json         # Filter by priority, JSON output
+ohno task task-abc123           # Get full task details
+
+# Task lifecycle
+ohno create "Fix the bug"       # Create new task
+ohno start task-abc             # Start working (-> in_progress)
+ohno done task-abc              # Mark complete (-> done)
+ohno review task-abc            # Mark for review
+ohno block task-abc "reason"    # Set blocker
+ohno unblock task-abc           # Resolve blocker
+
+# Dependencies
+ohno dep add task-b task-a      # task-b depends on task-a
+ohno dep rm task-b task-a       # Remove dependency
+ohno dep list task-b            # Show dependencies
+
+# AI Agent commands (for session continuity)
+ohno context --json             # Get session context
+ohno next --json                # Get next recommended task
+```
+
 ### Features
 
-- **Zero dependencies** - Pure Python stdlib
+- **Zero dependencies** - Pure Python stdlib (visualization)
 - **Live reload** - Watches tasks.db, auto-refreshes browser
 - **Self-contained HTML** - No external assets
 - **Detail panel** - Click any task for full details, files, activity history
+- **JSON output** - All commands support `--json` for machine parsing
+- **Universal** - Works with any AI agent that has shell access
 
 ## Database Schema
 
@@ -202,9 +245,11 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for full schema details.
 
 | You want... | Install |
 |-------------|---------|
-| Visual board only | `pip install git+https://github.com/srstomp/ohno.git#subdirectory=ohno-cli` then `ohno serve` |
-| Agent continuity only | Add MCP config (see Quick Start) |
-| Full experience | Install both packages via pip |
+| Visual board only | `pip install git+https://github.com/srstomp/ohno.git#subdirectory=ohno-cli` |
+| CLI + task commands | `pip install "ohno-cli[tasks] @ git+https://github.com/srstomp/ohno.git#subdirectory=ohno-cli"` |
+| Claude Code (MCP) | Add MCP config (see Quick Start) |
+| Other AI agents | Install CLI, use shell commands |
+| Full experience | Install both ohno-mcp and ohno-cli |
 
 ## Related Projects
 
