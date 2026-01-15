@@ -24,17 +24,17 @@ Ohno provides two tools that share a common task database:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                      Claude Code                             │
-│                                                              │
+│                      Claude Code                            │
+│                                                             │
 │  ┌──────────────────────────────────────────────────────┐   │
-│  │                    ohno-mcp                           │   │
-│  │                                                       │   │
+│  │                    ohno-mcp                          │   │
+│  │                                                      │   │
 │  │  get_session_context()  ← Resume after compaction    │   │
 │  │  update_task_status()   ← Mark done/in_progress      │   │
 │  │  set_handoff_notes()    ← Leave notes for next       │   │
 │  └───────────────────────────┬──────────────────────────┘   │
-│                              │                               │
-└──────────────────────────────┼───────────────────────────────┘
+│                              │                              │
+└──────────────────────────────┼──────────────────────────────┘
                                │ read/write
                   ┌────────────┴────────────┐
                   │    .ohno/tasks.db       │
