@@ -66,3 +66,4 @@ htmlcov/
 *.log
 
 .playwright-mcp
+packages/.turbo/
