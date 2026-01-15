@@ -2,6 +2,21 @@
   "name": "ohno-core",
   "version": "0.5.0",
   "description": "Core database layer for ohno task management",
+  "author": "stevestomp",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/srstomp/ohno.git",
+    "directory": "packages/ohno-core"
+  },
+  "homepage": "https://github.com/srstomp/ohno#readme",
+  "keywords": [
+    "task-management",
+    "sqlite",
+    "database",
+    "ai-agents",
+    "kanban"
+  ],
+  "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -12,8 +27,10 @@
   },
   "scripts": {
     "build": "tsc",
-    "test": "node --test dist/**/*.test.js",
-    "clean": "rm -rf dist"
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "clean": "rm -rf dist",
+    "prepare": "npm run build"
   },
   "dependencies": {
     "better-sqlite3": "^11.6.0"
