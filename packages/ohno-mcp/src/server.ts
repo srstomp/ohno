@@ -9,7 +9,7 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { TaskDatabase, findDbPath, type TaskStatus, type DependencyType } from "ohno-core";
+import { TaskDatabase, findDbPath, type TaskStatus, type DependencyType } from "@stevestomp/ohno-core";
 
 // Zod schemas for tool parameters
 const GetTasksSchema = z.object({
@@ -298,6 +298,26 @@ const TOOLS = [
   },
 ];
 
+// Export schemas for testing
+export {
+  GetTasksSchema,
+  TaskIdSchema,
+  UpdateStatusSchema,
+  CreateTaskSchema,
+  UpdateTaskSchema,
+  ActivitySchema,
+  HandoffNotesSchema,
+  ProgressSchema,
+  BlockerSchema,
+  ArchiveSchema,
+  DependencySchema,
+  RemoveDependencySchema,
+  SummarizeSchema,
+};
+
+// Export tool definitions for testing
+export { TOOLS };
+
 // Database singleton
 let db: TaskDatabase | null = null;
 
@@ -312,8 +332,17 @@ function getDb(): TaskDatabase {
   return db;
 }
 
-// Tool handler
-function handleTool(name: string, args: Record<string, unknown>): unknown {
+/**
+ * Set database instance (for testing)
+ */
+export function setDb(database: TaskDatabase | null): void {
+  db = database;
+}
+
+/**
+ * Tool handler - exported for testing
+ */
+export function handleTool(name: string, args: Record<string, unknown>): unknown {
   const database = getDb();
 
   switch (name) {
