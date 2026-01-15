@@ -46,6 +46,40 @@ Ohno provides multiple integration options:
                └─────────────────────────┘
 ```
 
+## Quick Start
+
+### For Agents (MCP Server)
+
+Add to Claude Code settings (`~/.claude/settings.json`):
+
+```json
+{
+  "mcpServers": {
+    "ohno": {
+      "command": "npx",
+      "args": ["ohno-mcp"]
+    }
+  }
+}
+```
+
+### For Humans (CLI + Visual Board)
+
+```bash
+# No install needed - just run
+npx ohno init
+npx ohno serve
+```
+
+Open http://localhost:3333/kanban.html to see your tasks.
+
+### Global Install (optional)
+
+```bash
+npm install -g ohno-cli
+ohno serve
+```
+
 ## Integration Capabilities
 
 | Platform | Integration Method |
@@ -58,51 +92,6 @@ Ohno provides multiple integration options:
 | **LangChain / LlamaIndex** | CLI via subprocess wrapper |
 | **CI/CD pipelines** | CLI with `--json` output |
 | **Human developers** | CLI + visual kanban board |
-
-## Quick Start
-
-### For Agents (MCP Server)
-
-Add to Claude Code settings (`~/.claude/settings.json`):
-
-```json
-{
-  "mcpServers": {
-    "ohno": {
-      "command": "uvx",
-      "args": ["--from", "git+https://github.com/srstomp/ohno.git#subdirectory=ohno-mcp", "ohno-mcp"]
-    }
-  }
-}
-```
-
-Or install manually:
-```bash
-pip install git+https://github.com/srstomp/ohno.git#subdirectory=ohno-mcp
-```
-
-### For Humans (Visual Board)
-
-```bash
-# Install the CLI
-pip install git+https://github.com/srstomp/ohno.git#subdirectory=ohno-cli
-
-# Run it
-ohno serve
-```
-
-Open http://localhost:3333/kanban.html to see your tasks.
-
-### Both Tools Together
-
-```bash
-# Install both
-pip install git+https://github.com/srstomp/ohno.git#subdirectory=ohno-mcp
-pip install git+https://github.com/srstomp/ohno.git#subdirectory=ohno-cli
-
-# Run visual board
-ohno serve
-```
 
 ## CLAUDE.md Example
 
@@ -136,7 +125,7 @@ Always call before session ends or context compaction:
 - `set_blocker(task_id, reason)` - When blocked on something
 
 ### Visual Board
-Run `ohno serve` to view tasks at http://localhost:3333/kanban.html
+Run `npx ohno serve` to view tasks at http://localhost:3333/kanban.html
 ```
 
 ## MCP Tools Reference
@@ -171,7 +160,7 @@ Run `ohno serve` to view tasks at http://localhost:3333/kanban.html
 | `update_task(task_id, ...)` | Modify task details |
 | `archive_task(task_id, reason)` | Archive task no longer needed |
 
-## Ohno CLI Reference
+## CLI Reference
 
 ### Visualization Commands
 
@@ -213,7 +202,7 @@ ohno next --json                # Get next recommended task
 
 ### Features
 
-- **Zero dependencies** - Pure Python stdlib (visualization)
+- **Zero install** - `npx ohno` just works
 - **Live reload** - Watches tasks.db, auto-refreshes browser
 - **Self-contained HTML** - No external assets
 - **Detail panel** - Click any task for full details, files, activity history
@@ -222,12 +211,12 @@ ohno next --json                # Get next recommended task
 
 ## Database Schema
 
-Both tools share the same SQLite database (`.ohno/tasks.db`):
+All tools share the same SQLite database (`.ohno/tasks.db`):
 
 ```sql
--- Core tables (created by prd-analyzer or other skills)
+-- Core tables
 projects (id, name, ...)
-epics    (id, title, priority, audit_level, ...)
+epics    (id, title, priority, ...)
 stories  (id, epic_id, title, status, ...)
 tasks    (id, story_id, title, status, task_type, estimate_hours,
           description, context_summary, working_files, blockers,
@@ -241,15 +230,14 @@ task_dependencies (id, task_id, depends_on_task_id, ...)
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for full schema details.
 
-## Installation Options
+## Package Structure
 
-| You want... | Install |
-|-------------|---------|
-| Visual board only | `pip install git+https://github.com/srstomp/ohno.git#subdirectory=ohno-cli` |
-| CLI + task commands | `pip install "ohno-cli[tasks] @ git+https://github.com/srstomp/ohno.git#subdirectory=ohno-cli"` |
-| Claude Code (MCP) | Add MCP config (see Quick Start) |
-| Other AI agents | Install CLI, use shell commands |
-| Full experience | Install both ohno-mcp and ohno-cli |
+```
+packages/
+├── ohno-core/    # Shared database layer (TypeScript)
+├── ohno-mcp/     # MCP server with 19 tools
+└── ohno-cli/     # CLI with 14 commands
+```
 
 ## Related Projects
 
