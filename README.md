@@ -57,7 +57,7 @@ Add to Claude Code settings (`~/.claude/settings.json`):
   "mcpServers": {
     "ohno": {
       "command": "npx",
-      "args": ["ohno-mcp"]
+      "args": ["@stevestomp/ohno-mcp"]
     }
   }
 }
@@ -67,8 +67,8 @@ Add to Claude Code settings (`~/.claude/settings.json`):
 
 ```bash
 # No install needed - just run
-npx ohno init
-npx ohno serve
+npx @stevestomp/ohno-cli init
+npx @stevestomp/ohno-cli serve
 ```
 
 Open http://localhost:3333/kanban.html to see your tasks.
@@ -76,7 +76,7 @@ Open http://localhost:3333/kanban.html to see your tasks.
 ### Global Install (optional)
 
 ```bash
-npm install -g ohno-cli
+npm install -g @stevestomp/ohno-cli
 ohno serve
 ```
 
@@ -125,7 +125,7 @@ Always call before session ends or context compaction:
 - `set_blocker(task_id, reason)` - When blocked on something
 
 ### Visual Board
-Run `npx ohno serve` to view tasks at http://localhost:3333/kanban.html
+Run `npx @stevestomp/ohno-cli serve` to view tasks at http://localhost:3333/kanban.html
 ```
 
 ## MCP Tools Reference
@@ -202,7 +202,7 @@ ohno next --json                # Get next recommended task
 
 ### Features
 
-- **Zero install** - `npx ohno` just works
+- **Zero install** - `npx @stevestomp/ohno-cli` just works
 - **Live reload** - Watches tasks.db, auto-refreshes browser
 - **Self-contained HTML** - No external assets
 - **Detail panel** - Click any task for full details, files, activity history

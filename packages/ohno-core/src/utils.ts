@@ -17,11 +17,13 @@ export function generateTaskId(title: string, storyId: string | null, timestamp:
 }
 
 /**
- * Generate a content-based activity ID
+ * Generate a unique activity ID
  * Format: act-{sha256[:8]}
+ * Includes random component to avoid collisions within same timestamp
  */
 export function generateActivityId(taskId: string, activityType: string, timestamp: string): string {
-  const content = `${taskId}|${activityType}|${timestamp}`;
+  const random = crypto.randomBytes(4).toString("hex");
+  const content = `${taskId}|${activityType}|${timestamp}|${random}`;
   const hash = crypto.createHash("sha256").update(content).digest("hex");
   return `act-${hash.slice(0, 8)}`;
 }
