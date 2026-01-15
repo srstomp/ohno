@@ -2,6 +2,20 @@
   "name": "ohno-mcp",
   "version": "0.5.0",
   "description": "MCP server for ohno task management",
+  "author": "stevestomp",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/srstomp/ohno.git",
+    "directory": "packages/ohno-mcp"
+  },
+  "homepage": "https://github.com/srstomp/ohno#readme",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "ai-agents",
+    "task-management",
+    "claude"
+  ],
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -12,7 +26,10 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
-    "clean": "rm -rf dist"
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "clean": "rm -rf dist",
+    "prepare": "npm run build"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",

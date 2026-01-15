@@ -2,6 +2,21 @@
   "name": "ohno-cli",
   "version": "0.5.0",
   "description": "Task management CLI for AI agents and humans with visual kanban board",
+  "author": "stevestomp",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/srstomp/ohno.git",
+    "directory": "packages/ohno-cli"
+  },
+  "homepage": "https://github.com/srstomp/ohno#readme",
+  "keywords": [
+    "kanban",
+    "tasks",
+    "cli",
+    "ai-agents",
+    "mcp",
+    "task-management"
+  ],
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -12,7 +27,10 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
-    "clean": "rm -rf dist"
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "clean": "rm -rf dist",
+    "prepare": "npm run build"
   },
   "dependencies": {
     "chalk": "^5.4.0",
@@ -28,12 +46,5 @@
   "engines": {
     "node": ">=18.0.0"
   },
-  "keywords": [
-    "kanban",
-    "tasks",
-    "cli",
-    "ai-agents",
-    "mcp"
-  ],
   "license": "MIT"
 }
