@@ -51,10 +51,10 @@ describe("ID Generation", () => {
   });
 
   describe("generateActivityId", () => {
-    it("should generate consistent IDs for same inputs", () => {
+    it("should generate unique IDs for same inputs (includes randomness)", () => {
       const id1 = generateActivityId("task-123", "note", "2024-01-01T00:00:00Z");
       const id2 = generateActivityId("task-123", "note", "2024-01-01T00:00:00Z");
-      expect(id1).toBe(id2);
+      expect(id1).not.toBe(id2);
     });
 
     it("should start with 'act-' prefix", () => {
