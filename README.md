@@ -13,6 +13,8 @@
 
 **Ohno enables session continuity across context compaction, new sessions, and agent handoffs.**
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/srstomp/ohno)
+
 ## The Problem
 
 AI agents lose context. When:
