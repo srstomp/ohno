@@ -136,6 +136,44 @@ export function syncKanban(ohnoDir: string): boolean {
 }
 
 /**
+ * Try to listen on a port, returns a promise that resolves with the actual port used
+ */
+function tryListen(
+  server: http.Server,
+  port: number,
+  host: string,
+  maxAttempts: number = 10
+): Promise<number> {
+  return new Promise((resolve, reject) => {
+    let currentPort = port;
+    let attempts = 0;
+
+    const attemptListen = () => {
+      attempts++;
+
+      const onError = (err: NodeJS.ErrnoException) => {
+        if (err.code === "EADDRINUSE" && attempts < maxAttempts) {
+          server.removeListener("error", onError);
+          currentPort++;
+          attemptListen();
+        } else {
+          reject(err);
+        }
+      };
+
+      server.once("error", onError);
+
+      server.listen(currentPort, host, () => {
+        server.removeListener("error", onError);
+        resolve(currentPort);
+      });
+    };
+
+    attemptListen();
+  });
+}
+
+/**
  * Start the serve command
  */
 export async function startServer(options: {
@@ -154,14 +192,31 @@ export async function startServer(options: {
   // Create and start HTTP server
   const server = createHttpServer(ohnoDir);
 
-  server.listen(port, host, () => {
+  try {
+    const actualPort = await tryListen(server, port, host);
+
     if (!quiet) {
       out.success(`Server started`);
-      out.print(`  ${colors.cyan(`http://${host}:${port}/kanban.html`)}`);
+      if (actualPort !== port) {
+        out.print(colors.dim(`  Port ${port} was in use, using ${actualPort}`));
+      }
+      out.print(`  ${colors.cyan(`http://${host}:${actualPort}/kanban.html`)}`);
       out.print(colors.dim("  Press Ctrl+C to stop"));
     }
-  });
 
-  // Watch for database changes
-  watchDatabase(ohnoDir);
+    // Watch for database changes
+    watchDatabase(ohnoDir);
+  } catch (err) {
+    const error = err as NodeJS.ErrnoException;
+    if (error.code === "EADDRINUSE") {
+      out.error(
+        "No available ports",
+        `Ports ${port}-${port + 9} are all in use`,
+        "Try specifying a different port with --port"
+      );
+    } else {
+      out.error("Failed to start server", error.message);
+    }
+    process.exit(1);
+  }
 }
