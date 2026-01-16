@@ -67,18 +67,36 @@ export function createHttpServer(ohnoDir: string): http.Server {
 
 /**
  * Watch database file and regenerate kanban on changes
+ *
+ * SQLite with WAL mode writes to tasks.db-wal first, then checkpoints to tasks.db.
+ * We watch both files to catch changes immediately.
  */
 export function watchDatabase(ohnoDir: string): void {
   const dbPath = path.join(ohnoDir, "tasks.db");
+  const walPath = `${dbPath}-wal`;
 
-  const watcher = watch(dbPath, {
+  // Watch both main db and WAL file for SQLite WAL mode compatibility
+  const watcher = watch([dbPath, walPath], {
     persistent: true,
     ignoreInitial: true,
   });
 
-  watcher.on("change", () => {
-    out.info("Database changed, regenerating kanban...");
-    syncKanban(ohnoDir);
+  // Debounce to avoid multiple regenerations when both files change
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  const DEBOUNCE_MS = 100;
+
+  watcher.on("change", (changedPath) => {
+    // Clear existing timer
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+    }
+
+    // Set new timer to debounce rapid changes
+    debounceTimer = setTimeout(() => {
+      out.info("Database changed, regenerating kanban...");
+      syncKanban(ohnoDir);
+      debounceTimer = null;
+    }, DEBOUNCE_MS);
   });
 
   // Handle graceful shutdown
