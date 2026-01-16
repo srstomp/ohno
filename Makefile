@@ -35,9 +35,14 @@ clean:
 	cd packages && npm run clean
 
 # Publishing targets
-publish-patch: _publish BUMP=patch
-publish-minor: _publish BUMP=minor
-publish-major: _publish BUMP=major
+publish-patch:
+	$(MAKE) _publish BUMP=patch
+
+publish-minor:
+	$(MAKE) _publish BUMP=minor
+
+publish-major:
+	$(MAKE) _publish BUMP=major
 
 _publish: test
 	@echo "Publishing $(BUMP) version..."
