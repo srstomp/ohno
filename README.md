@@ -1,8 +1,17 @@
-# Ohno
+```
+ ██████╗ ██╗  ██╗███╗   ██╗ ██████╗
+██╔═══██╗██║  ██║████╗  ██║██╔═══██╗
+██║   ██║███████║██╔██╗ ██║██║   ██║
+██║   ██║██╔══██║██║╚██╗██║██║   ██║
+╚██████╔╝██║  ██║██║ ╚████║╚██████╔╝
+ ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═══╝ ╚═════╝
+
+  Task Management for AI Workflows
+```
 
 > *Named after [Taiichi Ohno](https://en.wikipedia.org/wiki/Taiichi_Ohno), the father of the Toyota Production System and inventor of Kanban.*
 
-**Task management for AI agent workflows** - enables session continuity across context compaction, new sessions, and agent handoffs.
+**Ohno enables session continuity across context compaction, new sessions, and agent handoffs.**
 
 ## The Problem
 
@@ -45,6 +54,52 @@ Ohno provides multiple integration options:
                │      ohno serve         │  → browser (human)
                └─────────────────────────┘
 ```
+
+## Features
+
+### Core Capabilities
+
+| Feature | Description | Technical Details |
+|---------|-------------|-------------------|
+| **Multi-Channel Access** | Access task state via MCP tools, CLI commands, or visual board | MCP server (19 tools), CLI (14 commands), HTTP server with live reload |
+| **Session Continuity** | Survive context compaction and session boundaries | Persistent SQLite database with handoff notes, context summaries, and activity logs |
+| **Zero Installation** | Run without install via npx | Published to npm as `@stevestomp/ohno-cli` and `@stevestomp/ohno-mcp` |
+| **Live Visualization** | Real-time kanban board that auto-updates | File watcher + self-contained HTML with inline JavaScript |
+| **Universal Compatibility** | Works with any AI agent or human | Shell-accessible CLI, MCP protocol, and browser-based UI |
+
+### Task Management
+
+| Feature | Description | Technical Details |
+|---------|-------------|-------------------|
+| **Rich Task Model** | Epics → Stories → Tasks hierarchy | SQLite schema with projects, epics, stories, tasks, dependencies |
+| **Status Tracking** | Track task lifecycle states | Supported states: todo, in_progress, review, done, blocked |
+| **Blocker Management** | Record and resolve blockers | Dedicated blocker field with reason tracking |
+| **Progress Tracking** | Granular progress reporting | Percentage-based progress (0-100%) with estimate vs actual hours |
+| **Priority System** | Task prioritization and smart suggestions | P0-P3 priority levels with get_next_task() recommendation |
+| **Dependency Tracking** | Model task dependencies | task_dependencies table with blocks/requires/related types |
+| **Activity Logging** | Complete audit trail | task_activity table tracks status changes, notes, file modifications |
+| **File Association** | Link tasks to working files | task_files table tracks created/modified/referenced files |
+
+### Developer Experience
+
+| Feature | Description | Technical Details |
+|---------|-------------|-------------------|
+| **TypeScript Monorepo** | Type-safe, maintainable codebase | Turborepo with shared `@stevestomp/ohno-core` package |
+| **JSON Output** | Machine-readable output for scripts | All CLI commands support `--json` flag |
+| **Context Recovery** | Resume work after interruptions | `get_session_context()` returns in-progress tasks, blockers, handoff notes |
+| **Handoff Notes** | Leave notes for next agent/session | Markdown-formatted notes stored per task |
+| **Smart Defaults** | Works out of the box | Convention over configuration, walks up to find `.ohno/` |
+| **Cross-Platform** | Works on macOS, Linux, Windows | Node.js-based, uses cross-platform file watching (chokidar) |
+
+### Integration
+
+| Feature | Description | Technical Details |
+|---------|-------------|-------------------|
+| **MCP Native** | First-class Claude Code integration | Implements Model Context Protocol with 19 tools |
+| **GitHub Actions** | Ready for CI/CD | Install script via `/install-github-app` command |
+| **CLI Automation** | Scriptable task management | Shell commands with exit codes and JSON output |
+| **Local-First** | No cloud dependencies | SQLite database in `.ohno/tasks.db` |
+| **Self-Contained UI** | No external assets needed | Inline CSS/JS in generated HTML |
 
 ## Quick Start
 
@@ -238,13 +293,6 @@ packages/
 ├── ohno-mcp/     # MCP server with 19 tools
 └── ohno-cli/     # CLI with 14 commands
 ```
-
-## Related Projects
-
-Ohno is designed to work with Claude Code skills:
-- **prd-analyzer** - Parse PRDs and create tasks in tasks.db
-- **project-harness** - Orchestrate multi-session development
-- **product-manager** - Audit feature completeness
 
 ## License
 
