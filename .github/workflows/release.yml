@@ -1,0 +1,88 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version bump type'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: packages/package-lock.json
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: packages
+
+      - name: Build
+        run: npm run build
+        working-directory: packages
+
+      - name: Test
+        run: npm run test
+        working-directory: packages
+
+      - name: Bump version
+        id: version
+        env:
+          BUMP_TYPE: ${{ inputs.version }}
+        run: |
+          npm version "$BUMP_TYPE" --workspaces --no-git-tag-version
+          VERSION=$(node -p "require('./ohno-core/package.json').version")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+        working-directory: packages
+
+      - name: Commit and tag
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git add -A
+          git commit -m "chore: Release v$VERSION"
+          git tag "v$VERSION"
+          git push origin master --tags
+
+      - name: Publish to npm
+        run: |
+          npm publish --workspace @stevestomp/ohno-core --access public
+          npm publish --workspace @stevestomp/ohno-mcp --access public
+          npm publish --workspace @stevestomp/ohno-cli --access public
+        working-directory: packages
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          gh release create "v$VERSION" \
+            --title "v$VERSION" \
+            --generate-notes
