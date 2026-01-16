@@ -6,8 +6,12 @@ import { describe, it, expect, beforeEach, afterEach, vi, type MockInstance } fr
 import { mkdtempSync, rmSync, mkdirSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { createRequire } from "module";
 import { TaskDatabase } from "@stevestomp/ohno-core";
 import { createCli } from "./cli.js";
+
+const require = createRequire(import.meta.url);
+const pkg = require("../package.json");
 import {
   formatTask,
   formatStatus,
@@ -212,7 +216,7 @@ describe("CLI Commands", () => {
     it("should create CLI program", () => {
       const program = createCli();
       expect(program.name()).toBe("ohno");
-      expect(program.version()).toBe("0.5.0");
+      expect(program.version()).toBe(pkg.version);
     });
 
     it("should have required commands", () => {

@@ -3,6 +3,7 @@
  */
 
 import { Command } from "commander";
+import { createRequire } from "module";
 import {
   TaskDatabase,
   findDbPath,
@@ -13,7 +14,9 @@ import {
 import { out, formatTask, formatStatus, formatPriority, colors } from "./output.js";
 import { startServer, syncKanban } from "./server.js";
 
-const VERSION = "0.5.0";
+const require = createRequire(import.meta.url);
+const pkg = require("../package.json");
+const VERSION = pkg.version;
 
 // Get database, exit if not found
 function getDb(dir?: string): TaskDatabase {

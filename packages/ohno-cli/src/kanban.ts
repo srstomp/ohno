@@ -3,7 +3,11 @@
  */
 
 import Database from "better-sqlite3";
+import { createRequire } from "module";
 import { KANBAN_TEMPLATE } from "./template.js";
+
+const require = createRequire(import.meta.url);
+const pkg = require("../package.json");
 
 export interface KanbanData {
   synced_at: string;
@@ -47,7 +51,7 @@ export function exportDatabase(dbPath: string): KanbanData {
 
   const data: KanbanData = {
     synced_at: new Date().toISOString(),
-    version: "0.5.0",
+    version: pkg.version,
     projects: [],
     epics: [],
     stories: [],

@@ -1,6 +1,6 @@
 {
   "name": "@stevestomp/ohno-core",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Core database layer for ohno task management",
   "author": "stevestomp",
   "repository": {
