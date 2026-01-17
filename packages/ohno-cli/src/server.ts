@@ -92,9 +92,9 @@ export function watchDatabase(ohnoDir: string): void {
     }
 
     // Set new timer to debounce rapid changes
-    debounceTimer = setTimeout(() => {
+    debounceTimer = setTimeout(async () => {
       out.info("Database changed, regenerating kanban...");
-      syncKanban(ohnoDir);
+      await syncKanban(ohnoDir);
       debounceTimer = null;
     }, DEBOUNCE_MS);
   });
@@ -114,7 +114,7 @@ export function watchDatabase(ohnoDir: string): void {
 /**
  * Sync database to kanban HTML
  */
-export function syncKanban(ohnoDir: string): boolean {
+export async function syncKanban(ohnoDir: string): Promise<boolean> {
   const dbPath = path.join(ohnoDir, "tasks.db");
 
   if (!fs.existsSync(dbPath)) {
@@ -123,7 +123,7 @@ export function syncKanban(ohnoDir: string): boolean {
   }
 
   try {
-    const data = exportDatabase(dbPath);
+    const data = await exportDatabase(dbPath);
     const html = generateKanbanHtml(data);
     const htmlPath = path.join(ohnoDir, "kanban.html");
 
@@ -185,7 +185,7 @@ export async function startServer(options: {
   const { port, host, ohnoDir, quiet } = options;
 
   // Initial sync
-  if (!syncKanban(ohnoDir)) {
+  if (!(await syncKanban(ohnoDir))) {
     process.exit(1);
   }
 

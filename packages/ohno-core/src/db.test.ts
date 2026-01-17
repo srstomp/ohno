@@ -14,10 +14,10 @@ describe("TaskDatabase", () => {
   let dbPath: string;
   let db: TaskDatabase;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     tempDir = mkdtempSync(join(tmpdir(), "ohno-db-test-"));
     dbPath = join(tempDir, "tasks.db");
-    db = new TaskDatabase(dbPath);
+    db = await TaskDatabase.open(dbPath);
   });
 
   afterEach(() => {
@@ -36,8 +36,8 @@ describe("TaskDatabase", () => {
       expect(Array.isArray(tasks)).toBe(true);
     });
 
-    it("should handle multiple opens of same database", () => {
-      const db2 = new TaskDatabase(dbPath);
+    it("should handle multiple opens of same database", async () => {
+      const db2 = await TaskDatabase.open(dbPath);
       expect(db2).toBeDefined();
       db2.close();
     });

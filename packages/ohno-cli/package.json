@@ -1,6 +1,6 @@
 {
   "name": "@stevestomp/ohno-cli",
-  "version": "0.6.2",
+  "version": "0.8.0",
   "description": "Task management CLI for AI agents and humans with visual kanban board",
   "author": "stevestomp",
   "repository": {
@@ -40,6 +40,7 @@
     "chalk": "^5.4.0",
     "chokidar": "^4.0.0",
     "commander": "^12.1.0",
+    "sql.js": "^1.11.0",
     "@stevestomp/ohno-core": "*"
   },
   "devDependencies": {
