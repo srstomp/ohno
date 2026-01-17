@@ -1,6 +1,6 @@
 {
   "name": "@stevestomp/ohno-mcp",
-  "version": "0.8.0",
+  "version": "0.8.2",
   "description": "MCP server for ohno task management",
   "author": "stevestomp",
   "repository": {
