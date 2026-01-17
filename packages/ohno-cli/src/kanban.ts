@@ -2,12 +2,23 @@
  * Kanban board generation
  */
 
-import Database from "better-sqlite3";
+import initSqlJs from "sql.js";
+import * as fs from "fs";
 import { createRequire } from "module";
 import { KANBAN_TEMPLATE } from "./template.js";
 
 const require = createRequire(import.meta.url);
 const pkg = require("../package.json");
+
+// Cache sql.js initialization
+let sqlJsPromise: Promise<initSqlJs.SqlJsStatic> | null = null;
+
+async function getSqlJs(): Promise<initSqlJs.SqlJsStatic> {
+  if (!sqlJsPromise) {
+    sqlJsPromise = initSqlJs();
+  }
+  return sqlJsPromise;
+}
 
 export interface KanbanData {
   synced_at: string;
@@ -44,10 +55,32 @@ export interface KanbanData {
 }
 
 /**
+ * Convert sql.js query result to array of objects
+ */
+function queryToObjects<T>(db: initSqlJs.Database, sql: string): T[] {
+  try {
+    const result = db.exec(sql);
+    if (result.length === 0) return [];
+    const { columns, values } = result[0];
+    return values.map((row) => {
+      const obj: Record<string, unknown> = {};
+      columns.forEach((col, i) => {
+        obj[col] = row[i];
+      });
+      return obj as T;
+    });
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Export database to JSON structure for kanban
  */
-export function exportDatabase(dbPath: string): KanbanData {
-  const db = new Database(dbPath, { readonly: true });
+export async function exportDatabase(dbPath: string): Promise<KanbanData> {
+  const SQL = await getSqlJs();
+  const buffer = fs.readFileSync(dbPath);
+  const db = new SQL.Database(buffer);
 
   const data: KanbanData = {
     synced_at: new Date().toISOString(),
@@ -83,22 +116,13 @@ export function exportDatabase(dbPath: string): KanbanData {
     },
   };
 
-  // Helper to safely query table
-  const safeQuery = (sql: string): unknown[] => {
-    try {
-      return db.prepare(sql).all();
-    } catch {
-      return [];
-    }
-  };
-
   // Export tables
-  data.projects = safeQuery("SELECT * FROM projects");
-  data.epics = safeQuery("SELECT * FROM epics");
-  data.stories = safeQuery("SELECT * FROM stories");
+  data.projects = queryToObjects(db, "SELECT * FROM projects");
+  data.epics = queryToObjects(db, "SELECT * FROM epics");
+  data.stories = queryToObjects(db, "SELECT * FROM stories");
 
   // Get tasks with joined info
-  data.tasks = safeQuery(`
+  data.tasks = queryToObjects(db, `
     SELECT
       t.*,
       s.title as story_title,
@@ -112,7 +136,7 @@ export function exportDatabase(dbPath: string): KanbanData {
     ORDER BY t.updated_at DESC
   `);
 
-  data.task_activity = safeQuery(`
+  data.task_activity = queryToObjects(db, `
     SELECT a.*, t.title as task_title
     FROM task_activity a
     JOIN tasks t ON a.task_id = t.id
@@ -120,8 +144,8 @@ export function exportDatabase(dbPath: string): KanbanData {
     LIMIT 100
   `);
 
-  data.task_files = safeQuery("SELECT * FROM task_files");
-  data.task_dependencies = safeQuery(`
+  data.task_files = queryToObjects(db, "SELECT * FROM task_files");
+  data.task_dependencies = queryToObjects(db, `
     SELECT d.*, t.title as depends_on_title, t.status as depends_on_status
     FROM task_dependencies d
     JOIN tasks t ON d.depends_on_task_id = t.id

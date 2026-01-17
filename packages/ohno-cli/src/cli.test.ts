@@ -194,12 +194,12 @@ describe("CLI Commands", () => {
   let consoleLogSpy: ReturnType<typeof vi.spyOn>;
   let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     tempDir = mkdtempSync(join(tmpdir(), "ohno-cli-test-"));
     ohnoDir = join(tempDir, ".ohno");
     mkdirSync(ohnoDir);
     dbPath = join(ohnoDir, "tasks.db");
-    db = new TaskDatabase(dbPath);
+    db = await TaskDatabase.open(dbPath);
 
     // Spy on console to capture output
     consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -405,6 +405,8 @@ describe("CLI Commands", () => {
       const parsed = JSON.parse(output);
       expect(parsed.success).toBe(true);
 
+      // Reload to see changes made by CLI
+      await db.reload();
       const task = db.getTask(parsed.task_id);
       expect(task?.task_type).toBe("bug");
       expect(task?.estimate_hours).toBe(4);
@@ -424,6 +426,8 @@ describe("CLI Commands", () => {
       const parsed = JSON.parse(output);
       expect(parsed.success).toBe(true);
 
+      // Reload to see changes made by CLI
+      await db.reload();
       const task = db.getTask(taskId);
       expect(task?.status).toBe("in_progress");
     });
@@ -442,6 +446,8 @@ describe("CLI Commands", () => {
       const parsed = JSON.parse(output);
       expect(parsed.success).toBe(true);
 
+      // Reload to see changes made by CLI
+      await db.reload();
       const task = db.getTask(taskId);
       expect(task?.status).toBe("done");
     });
@@ -469,6 +475,8 @@ describe("CLI Commands", () => {
       const parsed = JSON.parse(output);
       expect(parsed.success).toBe(true);
 
+      // Reload to see changes made by CLI
+      await db.reload();
       const task = db.getTask(taskId);
       expect(task?.status).toBe("blocked");
       expect(task?.blockers).toBe("Waiting for API");
@@ -489,6 +497,8 @@ describe("CLI Commands", () => {
       const parsed = JSON.parse(output);
       expect(parsed.success).toBe(true);
 
+      // Reload to see changes made by CLI
+      await db.reload();
       const task = db.getTask(taskId);
       expect(task?.status).toBe("in_progress");
     });

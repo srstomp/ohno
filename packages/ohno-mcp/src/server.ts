@@ -321,13 +321,13 @@ export { TOOLS };
 // Database singleton
 let db: TaskDatabase | null = null;
 
-function getDb(): TaskDatabase {
+async function getDb(): Promise<TaskDatabase> {
   if (!db) {
     const dbPath = process.env.OHNO_DB_PATH ?? findDbPath();
     if (!dbPath) {
       throw new Error("Could not find .ohno/tasks.db. Run 'ohno init' first or set OHNO_DB_PATH.");
     }
-    db = new TaskDatabase(dbPath);
+    db = await TaskDatabase.open(dbPath);
   }
   return db;
 }
@@ -342,8 +342,8 @@ export function setDb(database: TaskDatabase | null): void {
 /**
  * Tool handler - exported for testing
  */
-export function handleTool(name: string, args: Record<string, unknown>): unknown {
-  const database = getDb();
+export async function handleTool(name: string, args: Record<string, unknown>): Promise<unknown> {
+  const database = await getDb();
 
   switch (name) {
     case "get_project_status":
@@ -511,7 +511,7 @@ export async function createServer(): Promise<Server> {
     const { name, arguments: args } = request.params;
 
     try {
-      const result = handleTool(name, args ?? {});
+      const result = await handleTool(name, args ?? {});
       return {
         content: [
           {

@@ -19,7 +19,7 @@ const pkg = require("../package.json");
 const VERSION = pkg.version;
 
 // Get database, exit if not found
-function getDb(dir?: string): TaskDatabase {
+async function getDb(dir?: string): Promise<TaskDatabase> {
   const dbPath = findDbPath(dir);
   if (!dbPath) {
     out.error(
@@ -29,7 +29,7 @@ function getDb(dir?: string): TaskDatabase {
     );
     process.exit(1);
   }
-  return new TaskDatabase(dbPath);
+  return TaskDatabase.open(dbPath);
 }
 
 // Get ohno directory, exit if not found
@@ -88,11 +88,11 @@ export function createCli(): Command {
     .command("sync")
     .description("One-time sync of kanban HTML")
     .option("-q, --quiet", "Suppress output")
-    .action((options, command) => {
+    .action(async (options, command) => {
       const globalOpts = command.parent?.opts() ?? {};
       const ohnoDir = getOhnoDir(globalOpts.dir);
 
-      if (syncKanban(ohnoDir)) {
+      if (await syncKanban(ohnoDir)) {
         if (!options.quiet) {
           out.success("Kanban synced");
         }
@@ -107,9 +107,9 @@ export function createCli(): Command {
   program
     .command("status")
     .description("Show project statistics")
-    .action((options, command) => {
+    .action(async (options, command) => {
       const globalOpts = command.parent?.opts() ?? {};
-      const db = getDb(globalOpts.dir);
+      const db = await getDb(globalOpts.dir);
       const status = db.getProjectStatus();
       db.close();
 
@@ -135,7 +135,7 @@ export function createCli(): Command {
     .command("init")
     .description("Initialize .ohno/ directory")
     .option("-f, --force", "Overwrite existing")
-    .action((options, command) => {
+    .action(async (options, command) => {
       const globalOpts = command.parent?.opts() ?? {};
       const baseDir = globalOpts.dir ?? process.cwd();
 
@@ -144,7 +144,7 @@ export function createCli(): Command {
 
         // Create empty database to initialize schema
         const dbPath = `${ohnoDir}/tasks.db`;
-        const db = new TaskDatabase(dbPath);
+        const db = await TaskDatabase.open(dbPath);
         db.close();
 
         if (globalOpts.json) {
@@ -168,9 +168,9 @@ export function createCli(): Command {
     .option("-s, --status <status>", "Filter by status (todo, in_progress, review, done, blocked)")
     .option("-p, --priority <priority>", "Filter by priority (P0, P1, P2, P3)")
     .option("-l, --limit <limit>", "Max tasks to return", "50")
-    .action((options, command) => {
+    .action(async (options, command) => {
       const globalOpts = command.parent?.opts() ?? {};
-      const db = getDb(globalOpts.dir);
+      const db = await getDb(globalOpts.dir);
 
       const tasks = db.getTasks({
         status: options.status as TaskStatus,
@@ -200,9 +200,9 @@ export function createCli(): Command {
   program
     .command("task <id>")
     .description("Get task details")
-    .action((id, options, command) => {
+    .action(async (id, options, command) => {
       const globalOpts = command.parent?.opts() ?? {};
-      const db = getDb(globalOpts.dir);
+      const db = await getDb(globalOpts.dir);
       const task = db.getTask(id);
       db.close();
 
@@ -224,9 +224,9 @@ export function createCli(): Command {
     .option("-t, --type <type>", "Task type (feature, bug, chore, spike, test)", "feature")
     .option("--description <desc>", "Task description")
     .option("-e, --estimate <hours>", "Estimated hours")
-    .action((title, options, command) => {
+    .action(async (title, options, command) => {
       const globalOpts = command.parent?.opts() ?? {};
-      const db = getDb(globalOpts.dir);
+      const db = await getDb(globalOpts.dir);
 
       const taskId = db.createTask({
         title,
@@ -247,9 +247,9 @@ export function createCli(): Command {
     .command("start <id>")
     .description("Start working on a task (set status to in_progress)")
     .option("-n, --notes <notes>", "Handoff notes")
-    .action((id, options, command) => {
+    .action(async (id, options, command) => {
       const globalOpts = command.parent?.opts() ?? {};
-      const db = getDb(globalOpts.dir);
+      const db = await getDb(globalOpts.dir);
       const success = db.updateTaskStatus(id, "in_progress", options.notes);
       db.close();
 
@@ -267,9 +267,9 @@ export function createCli(): Command {
     .command("done <id>")
     .description("Mark task as done")
     .option("-n, --notes <notes>", "Completion notes")
-    .action((id, options, command) => {
+    .action(async (id, options, command) => {
       const globalOpts = command.parent?.opts() ?? {};
-      const db = getDb(globalOpts.dir);
+      const db = await getDb(globalOpts.dir);
       const success = db.updateTaskStatus(id, "done", options.notes);
       db.close();
 
@@ -287,9 +287,9 @@ export function createCli(): Command {
     .command("review <id>")
     .description("Mark task for review")
     .option("-n, --notes <notes>", "Review notes")
-    .action((id, options, command) => {
+    .action(async (id, options, command) => {
       const globalOpts = command.parent?.opts() ?? {};
-      const db = getDb(globalOpts.dir);
+      const db = await getDb(globalOpts.dir);
       const success = db.updateTaskStatus(id, "review", options.notes);
       db.close();
 
@@ -306,9 +306,9 @@ export function createCli(): Command {
   program
     .command("block <id> <reason>")
     .description("Set a blocker on a task")
-    .action((id, reason, options, command) => {
+    .action(async (id, reason, options, command) => {
       const globalOpts = command.parent?.opts() ?? {};
-      const db = getDb(globalOpts.dir);
+      const db = await getDb(globalOpts.dir);
       const success = db.setBlocker(id, reason);
       db.close();
 
@@ -325,9 +325,9 @@ export function createCli(): Command {
   program
     .command("unblock <id>")
     .description("Resolve blocker on a task")
-    .action((id, options, command) => {
+    .action(async (id, options, command) => {
       const globalOpts = command.parent?.opts() ?? {};
-      const db = getDb(globalOpts.dir);
+      const db = await getDb(globalOpts.dir);
       const success = db.resolveBlocker(id);
       db.close();
 
@@ -352,9 +352,9 @@ export function createCli(): Command {
   dep
     .command("add <task-id> <depends-on-id>")
     .description("Add a dependency (task-id depends on depends-on-id)")
-    .action((taskId, dependsOnId, options, command) => {
+    .action(async (taskId, dependsOnId, options, command) => {
       const globalOpts = command.parent?.parent?.opts() ?? {};
-      const db = getDb(globalOpts.dir);
+      const db = await getDb(globalOpts.dir);
       const depId = db.addDependency(taskId, dependsOnId);
       db.close();
 
@@ -371,9 +371,9 @@ export function createCli(): Command {
   dep
     .command("rm <task-id> <depends-on-id>")
     .description("Remove a dependency")
-    .action((taskId, dependsOnId, options, command) => {
+    .action(async (taskId, dependsOnId, options, command) => {
       const globalOpts = command.parent?.parent?.opts() ?? {};
-      const db = getDb(globalOpts.dir);
+      const db = await getDb(globalOpts.dir);
       const success = db.removeDependency(taskId, dependsOnId);
       db.close();
 
@@ -390,9 +390,9 @@ export function createCli(): Command {
   dep
     .command("list <task-id>")
     .description("List dependencies for a task")
-    .action((taskId, options, command) => {
+    .action(async (taskId, options, command) => {
       const globalOpts = command.parent?.parent?.opts() ?? {};
-      const db = getDb(globalOpts.dir);
+      const db = await getDb(globalOpts.dir);
       const deps = db.getTaskDependencies(taskId);
       const blocking = db.getBlockingDependencies(taskId);
       db.close();
@@ -421,9 +421,9 @@ export function createCli(): Command {
   program
     .command("context")
     .description("Get session context (for AI agents resuming work)")
-    .action((options, command) => {
+    .action(async (options, command) => {
       const globalOpts = command.parent?.opts() ?? {};
-      const db = getDb(globalOpts.dir);
+      const db = await getDb(globalOpts.dir);
       const ctx = db.getSessionContext();
       db.close();
 
@@ -460,9 +460,9 @@ export function createCli(): Command {
   program
     .command("next")
     .description("Get the recommended next task")
-    .action((options, command) => {
+    .action(async (options, command) => {
       const globalOpts = command.parent?.opts() ?? {};
-      const db = getDb(globalOpts.dir);
+      const db = await getDb(globalOpts.dir);
       const task = db.getNextTask();
       db.close();
 

@@ -32,10 +32,10 @@ describe("MCP Server", () => {
   let dbPath: string;
   let db: TaskDatabase;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     tempDir = mkdtempSync(join(tmpdir(), "ohno-mcp-test-"));
     dbPath = join(tempDir, "tasks.db");
-    db = new TaskDatabase(dbPath);
+    db = await TaskDatabase.open(dbPath);
     setDb(db);
   });
 
@@ -283,16 +283,16 @@ describe("MCP Server", () => {
 
   describe("Tool Handlers", () => {
     describe("get_project_status", () => {
-      it("should return project status", () => {
-        const result = handleTool("get_project_status", {}) as Record<string, unknown>;
+      it("should return project status", async () => {
+        const result = await handleTool("get_project_status", {}) as Record<string, unknown>;
         expect(result).toHaveProperty("total_tasks");
         expect(result).toHaveProperty("completion_percent");
       });
     });
 
     describe("get_session_context", () => {
-      it("should return session context", () => {
-        const result = handleTool("get_session_context", {}) as Record<string, unknown>;
+      it("should return session context", async () => {
+        const result = await handleTool("get_session_context", {}) as Record<string, unknown>;
         expect(result).toHaveProperty("in_progress_tasks");
         expect(result).toHaveProperty("blocked_tasks");
         expect(result).toHaveProperty("recent_activity");
@@ -300,23 +300,23 @@ describe("MCP Server", () => {
     });
 
     describe("get_tasks", () => {
-      it("should return empty tasks list initially", () => {
-        const result = handleTool("get_tasks", {}) as { tasks: unknown[] };
+      it("should return empty tasks list initially", async () => {
+        const result = await handleTool("get_tasks", {}) as { tasks: unknown[] };
         expect(result.tasks).toEqual([]);
       });
 
-      it("should return created tasks", () => {
+      it("should return created tasks", async () => {
         db.createTask({ title: "Test task" });
-        const result = handleTool("get_tasks", {}) as { tasks: unknown[] };
+        const result = await handleTool("get_tasks", {}) as { tasks: unknown[] };
         expect(result.tasks.length).toBe(1);
       });
 
-      it("should filter by status", () => {
+      it("should filter by status", async () => {
         db.createTask({ title: "Todo task" });
         const inProgressId = db.createTask({ title: "In progress" });
         db.updateTaskStatus(inProgressId, "in_progress");
 
-        const result = handleTool("get_tasks", { status: "in_progress" }) as {
+        const result = await handleTool("get_tasks", { status: "in_progress" }) as {
           tasks: Array<{ title: string }>;
         };
         expect(result.tasks.length).toBe(1);
@@ -325,41 +325,41 @@ describe("MCP Server", () => {
     });
 
     describe("get_task", () => {
-      it("should return task by ID", () => {
+      it("should return task by ID", async () => {
         const taskId = db.createTask({ title: "Test task" });
-        const result = handleTool("get_task", { task_id: taskId }) as { title: string };
+        const result = await handleTool("get_task", { task_id: taskId }) as { title: string };
         expect(result.title).toBe("Test task");
       });
 
-      it("should return error for non-existent task", () => {
-        const result = handleTool("get_task", { task_id: "non-existent" }) as { error: string };
+      it("should return error for non-existent task", async () => {
+        const result = await handleTool("get_task", { task_id: "non-existent" }) as { error: string };
         expect(result.error).toContain("Task not found");
       });
     });
 
     describe("get_next_task", () => {
-      it("should return message when no tasks", () => {
-        const result = handleTool("get_next_task", {}) as { message: string };
+      it("should return message when no tasks", async () => {
+        const result = await handleTool("get_next_task", {}) as { message: string };
         expect(result.message).toBe("No tasks available");
       });
 
-      it("should return next task", () => {
+      it("should return next task", async () => {
         db.createTask({ title: "Available task" });
-        const result = handleTool("get_next_task", {}) as { title: string };
+        const result = await handleTool("get_next_task", {}) as { title: string };
         expect(result.title).toBe("Available task");
       });
     });
 
     describe("get_blocked_tasks", () => {
-      it("should return empty list when no blocked tasks", () => {
-        const result = handleTool("get_blocked_tasks", {}) as { tasks: unknown[] };
+      it("should return empty list when no blocked tasks", async () => {
+        const result = await handleTool("get_blocked_tasks", {}) as { tasks: unknown[] };
         expect(result.tasks).toEqual([]);
       });
 
-      it("should return blocked tasks", () => {
+      it("should return blocked tasks", async () => {
         const taskId = db.createTask({ title: "Blocked task" });
         db.setBlocker(taskId, "Waiting for API");
-        const result = handleTool("get_blocked_tasks", {}) as {
+        const result = await handleTool("get_blocked_tasks", {}) as {
           tasks: Array<{ blockers: string }>;
         };
         expect(result.tasks.length).toBe(1);
@@ -368,8 +368,8 @@ describe("MCP Server", () => {
     });
 
     describe("create_task", () => {
-      it("should create task and return ID", () => {
-        const result = handleTool("create_task", { title: "New task" }) as {
+      it("should create task and return ID", async () => {
+        const result = await handleTool("create_task", { title: "New task" }) as {
           success: boolean;
           task_id: string;
         };
@@ -377,8 +377,8 @@ describe("MCP Server", () => {
         expect(result.task_id).toMatch(/^task-[a-f0-9]{8}$/);
       });
 
-      it("should create task with all options", () => {
-        const result = handleTool("create_task", {
+      it("should create task with all options", async () => {
+        const result = await handleTool("create_task", {
           title: "Full task",
           task_type: "bug",
           description: "Fix something",
@@ -392,9 +392,9 @@ describe("MCP Server", () => {
     });
 
     describe("update_task_status", () => {
-      it("should update task status", () => {
+      it("should update task status", async () => {
         const taskId = db.createTask({ title: "Test" });
-        const result = handleTool("update_task_status", {
+        const result = await handleTool("update_task_status", {
           task_id: taskId,
           status: "in_progress",
         }) as { success: boolean };
@@ -403,9 +403,9 @@ describe("MCP Server", () => {
         expect(db.getTask(taskId)?.status).toBe("in_progress");
       });
 
-      it("should set handoff notes when provided", () => {
+      it("should set handoff notes when provided", async () => {
         const taskId = db.createTask({ title: "Test" });
-        handleTool("update_task_status", {
+        await handleTool("update_task_status", {
           task_id: taskId,
           status: "done",
           notes: "Completed successfully",
@@ -416,9 +416,9 @@ describe("MCP Server", () => {
     });
 
     describe("update_task", () => {
-      it("should update task fields", () => {
+      it("should update task fields", async () => {
         const taskId = db.createTask({ title: "Original" });
-        const result = handleTool("update_task", {
+        const result = await handleTool("update_task", {
           task_id: taskId,
           title: "Updated",
           description: "New description",
@@ -432,9 +432,9 @@ describe("MCP Server", () => {
     });
 
     describe("add_task_activity", () => {
-      it("should add activity to task", () => {
+      it("should add activity to task", async () => {
         const taskId = db.createTask({ title: "Test" });
-        const result = handleTool("add_task_activity", {
+        const result = await handleTool("add_task_activity", {
           task_id: taskId,
           activity_type: "note",
           description: "Added a note",
@@ -445,9 +445,9 @@ describe("MCP Server", () => {
     });
 
     describe("set_handoff_notes", () => {
-      it("should set handoff notes", () => {
+      it("should set handoff notes", async () => {
         const taskId = db.createTask({ title: "Test" });
-        const result = handleTool("set_handoff_notes", {
+        const result = await handleTool("set_handoff_notes", {
           task_id: taskId,
           notes: "Continue from step 3",
         }) as { success: boolean };
@@ -458,9 +458,9 @@ describe("MCP Server", () => {
     });
 
     describe("update_task_progress", () => {
-      it("should update progress", () => {
+      it("should update progress", async () => {
         const taskId = db.createTask({ title: "Test" });
-        const result = handleTool("update_task_progress", {
+        const result = await handleTool("update_task_progress", {
           task_id: taskId,
           progress_percent: 50,
         }) as { success: boolean };
@@ -469,9 +469,9 @@ describe("MCP Server", () => {
         expect(db.getTask(taskId)?.progress_percent).toBe(50);
       });
 
-      it("should update progress with context summary", () => {
+      it("should update progress with context summary", async () => {
         const taskId = db.createTask({ title: "Test" });
-        handleTool("update_task_progress", {
+        await handleTool("update_task_progress", {
           task_id: taskId,
           progress_percent: 75,
           context_summary: "Almost done",
@@ -482,9 +482,9 @@ describe("MCP Server", () => {
     });
 
     describe("set_blocker", () => {
-      it("should set blocker on task", () => {
+      it("should set blocker on task", async () => {
         const taskId = db.createTask({ title: "Test" });
-        const result = handleTool("set_blocker", {
+        const result = await handleTool("set_blocker", {
           task_id: taskId,
           reason: "Waiting for API",
         }) as { success: boolean };
@@ -497,11 +497,11 @@ describe("MCP Server", () => {
     });
 
     describe("resolve_blocker", () => {
-      it("should resolve blocker", () => {
+      it("should resolve blocker", async () => {
         const taskId = db.createTask({ title: "Test" });
         db.setBlocker(taskId, "Waiting");
 
-        const result = handleTool("resolve_blocker", { task_id: taskId }) as {
+        const result = await handleTool("resolve_blocker", { task_id: taskId }) as {
           success: boolean;
         };
 
@@ -511,9 +511,9 @@ describe("MCP Server", () => {
     });
 
     describe("archive_task", () => {
-      it("should archive task", () => {
+      it("should archive task", async () => {
         const taskId = db.createTask({ title: "Test" });
-        const result = handleTool("archive_task", { task_id: taskId }) as {
+        const result = await handleTool("archive_task", { task_id: taskId }) as {
           success: boolean;
         };
 
@@ -523,11 +523,11 @@ describe("MCP Server", () => {
     });
 
     describe("add_dependency", () => {
-      it("should add dependency between tasks", () => {
+      it("should add dependency between tasks", async () => {
         const taskA = db.createTask({ title: "Task A" });
         const taskB = db.createTask({ title: "Task B" });
 
-        const result = handleTool("add_dependency", {
+        const result = await handleTool("add_dependency", {
           task_id: taskA,
           depends_on_task_id: taskB,
         }) as { success: boolean; dependency_id: string };
@@ -536,10 +536,10 @@ describe("MCP Server", () => {
         expect(result.dependency_id).toMatch(/^dep-[a-f0-9]{8}$/);
       });
 
-      it("should return error for invalid tasks", () => {
+      it("should return error for invalid tasks", async () => {
         const taskA = db.createTask({ title: "Task A" });
 
-        const result = handleTool("add_dependency", {
+        const result = await handleTool("add_dependency", {
           task_id: taskA,
           depends_on_task_id: "non-existent",
         }) as { success: boolean; error: string };
@@ -550,12 +550,12 @@ describe("MCP Server", () => {
     });
 
     describe("remove_dependency", () => {
-      it("should remove dependency", () => {
+      it("should remove dependency", async () => {
         const taskA = db.createTask({ title: "Task A" });
         const taskB = db.createTask({ title: "Task B" });
         db.addDependency(taskA, taskB);
 
-        const result = handleTool("remove_dependency", {
+        const result = await handleTool("remove_dependency", {
           task_id: taskA,
           depends_on_task_id: taskB,
         }) as { success: boolean };
@@ -565,12 +565,12 @@ describe("MCP Server", () => {
     });
 
     describe("get_task_dependencies", () => {
-      it("should return task dependencies", () => {
+      it("should return task dependencies", async () => {
         const taskA = db.createTask({ title: "Task A" });
         const taskB = db.createTask({ title: "Task B" });
         db.addDependency(taskA, taskB);
 
-        const result = handleTool("get_task_dependencies", { task_id: taskA }) as {
+        const result = await handleTool("get_task_dependencies", { task_id: taskA }) as {
           dependencies: unknown[];
           blocking: string[];
           is_blocked: boolean;
@@ -583,9 +583,9 @@ describe("MCP Server", () => {
     });
 
     describe("summarize_task_activity", () => {
-      it("should return message when not enough activity", () => {
+      it("should return message when not enough activity", async () => {
         const taskId = db.createTask({ title: "Test" });
-        const result = handleTool("summarize_task_activity", { task_id: taskId }) as {
+        const result = await handleTool("summarize_task_activity", { task_id: taskId }) as {
           success: boolean;
           message: string;
         };
@@ -596,24 +596,24 @@ describe("MCP Server", () => {
     });
 
     describe("unknown tool", () => {
-      it("should throw error for unknown tool", () => {
-        expect(() => handleTool("unknown_tool", {})).toThrow("Unknown tool: unknown_tool");
+      it("should throw error for unknown tool", async () => {
+        await expect(handleTool("unknown_tool", {})).rejects.toThrow("Unknown tool: unknown_tool");
       });
     });
   });
 
   describe("Error Handling", () => {
-    it("should throw ZodError for invalid arguments", () => {
-      expect(() =>
+    it("should throw ZodError for invalid arguments", async () => {
+      await expect(
         handleTool("update_task_status", {
           task_id: "task-123",
           status: "invalid_status",
         })
-      ).toThrow(ZodError);
+      ).rejects.toThrow(ZodError);
     });
 
-    it("should throw ZodError for missing required arguments", () => {
-      expect(() => handleTool("get_task", {})).toThrow(ZodError);
+    it("should throw ZodError for missing required arguments", async () => {
+      await expect(handleTool("get_task", {})).rejects.toThrow(ZodError);
     });
   });
 });
