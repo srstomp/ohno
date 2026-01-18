@@ -66,7 +66,8 @@ Ohno provides multiple integration options:
 | **Multi-Channel Access** | Access task state via MCP tools, CLI commands, or visual board | MCP server (19 tools), CLI (14 commands), HTTP server with live reload |
 | **Session Continuity** | Survive context compaction and session boundaries | Persistent SQLite database with handoff notes, context summaries, and activity logs |
 | **Zero Installation** | Run without install via npx | Published to npm as `@stevestomp/ohno-cli` and `@stevestomp/ohno-mcp` |
-| **Live Visualization** | Real-time kanban board that auto-updates | File watcher + self-contained HTML with inline JavaScript |
+| **No Native Dependencies** | Works on any Node.js version without build tools | Pure JavaScript SQLite (sql.js/WebAssembly) - no compilation required |
+| **Live Visualization** | Real-time kanban board with edit/delete support | File watcher + self-contained HTML with inline JavaScript |
 | **Universal Compatibility** | Works with any AI agent or human | Shell-accessible CLI, MCP protocol, and browser-based UI |
 
 ### Task Management
@@ -261,6 +262,7 @@ ohno next --json                # Get next recommended task
 
 - **Zero install** - `npx @stevestomp/ohno-cli` just works
 - **Live reload** - Watches tasks.db, auto-refreshes browser
+- **Edit/Delete** - Edit task details or delete tasks directly from the board
 - **Self-contained HTML** - No external assets
 - **Detail panel** - Click any task for full details, files, activity history
 - **JSON output** - All commands support `--json` for machine parsing
