@@ -17,6 +17,8 @@ export type {
   Priority,
   ActivityType,
   DependencyType,
+  TaskCompletionBoundaries,
+  UpdateStatusResult,
 } from "./types.js";
 
 export { toDict } from "./types.js";

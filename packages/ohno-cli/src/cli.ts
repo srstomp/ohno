@@ -250,12 +250,12 @@ export function createCli(): Command {
     .action(async (id, options, command) => {
       const globalOpts = command.parent?.opts() ?? {};
       const db = await getDb(globalOpts.dir);
-      const success = db.updateTaskStatus(id, "in_progress", options.notes);
+      const result = db.updateTaskStatus(id, "in_progress", options.notes);
       db.close();
 
       if (globalOpts.json) {
-        out.json({ success });
-      } else if (success) {
+        out.json(result);
+      } else if (result.success) {
         out.success(`Started task ${id}`);
       } else {
         out.error("Failed to start task", id);
@@ -270,12 +270,12 @@ export function createCli(): Command {
     .action(async (id, options, command) => {
       const globalOpts = command.parent?.opts() ?? {};
       const db = await getDb(globalOpts.dir);
-      const success = db.updateTaskStatus(id, "done", options.notes);
+      const result = db.updateTaskStatus(id, "done", options.notes);
       db.close();
 
       if (globalOpts.json) {
-        out.json({ success });
-      } else if (success) {
+        out.json(result);
+      } else if (result.success) {
         out.success(`Completed task ${id}`);
       } else {
         out.error("Failed to complete task", id);
@@ -290,12 +290,12 @@ export function createCli(): Command {
     .action(async (id, options, command) => {
       const globalOpts = command.parent?.opts() ?? {};
       const db = await getDb(globalOpts.dir);
-      const success = db.updateTaskStatus(id, "review", options.notes);
+      const result = db.updateTaskStatus(id, "review", options.notes);
       db.close();
 
       if (globalOpts.json) {
-        out.json({ success });
-      } else if (success) {
+        out.json(result);
+      } else if (result.success) {
         out.success(`Task ${id} marked for review`);
       } else {
         out.error("Failed to update task", id);

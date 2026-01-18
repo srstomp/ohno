@@ -134,7 +134,7 @@ const TOOLS = [
   },
   {
     name: "update_task_status",
-    description: "Update a task's status (todo, in_progress, review, done, blocked)",
+    description: "Update a task's status (todo, in_progress, review, done, blocked). When marking as done/archived, returns boundary metadata indicating if the task's story or epic was also completed.",
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -379,12 +379,13 @@ export async function handleTool(name: string, args: Record<string, unknown>): P
 
     case "update_task_status": {
       const parsed = UpdateStatusSchema.parse(args);
-      const success = database.updateTaskStatus(
+      const result = database.updateTaskStatus(
         parsed.task_id,
         parsed.status as TaskStatus,
         parsed.notes
       );
-      return { success };
+      // Return full result including boundaries when completing a task
+      return result;
     }
 
     case "add_task_activity": {

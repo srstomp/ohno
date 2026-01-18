@@ -126,6 +126,25 @@ export interface GetTasksOptions {
 }
 
 /**
+ * Boundary metadata for task completion
+ * Indicates whether completing a task also completed its story or epic
+ */
+export interface TaskCompletionBoundaries {
+  story_completed: boolean;
+  epic_completed: boolean;
+  story_id: string | null;
+  epic_id: string | null;
+}
+
+/**
+ * Result of updating a task's status
+ */
+export interface UpdateStatusResult {
+  success: boolean;
+  boundaries?: TaskCompletionBoundaries;
+}
+
+/**
  * Convert an object to a dict, excluding undefined/null values
  */
 export function toDict<T extends object>(obj: T): Record<string, unknown> {
