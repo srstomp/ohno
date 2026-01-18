@@ -284,6 +284,129 @@ export const KANBAN_TEMPLATE = `<!DOCTYPE html>
         }
         .detail-close:hover { background: var(--bg-primary); color: var(--text-primary); }
 
+        .detail-actions {
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 0.75rem;
+        }
+
+        .btn {
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            font-weight: 500;
+            cursor: pointer;
+            border: 1px solid var(--border);
+            transition: background 0.2s, border-color 0.2s;
+        }
+
+        .btn-edit {
+            background: var(--bg-card);
+            color: var(--text-primary);
+        }
+        .btn-edit:hover { background: var(--blue); border-color: var(--blue); }
+
+        .btn-delete {
+            background: var(--bg-card);
+            color: var(--red);
+            border-color: var(--red);
+        }
+        .btn-delete:hover { background: var(--red); color: white; }
+
+        .btn-primary {
+            background: var(--blue);
+            color: white;
+            border-color: var(--blue);
+        }
+        .btn-primary:hover { background: #2563eb; }
+
+        .btn-cancel {
+            background: var(--bg-card);
+            color: var(--text-secondary);
+        }
+        .btn-cancel:hover { background: var(--bg-primary); }
+
+        .modal-backdrop {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.7);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 300;
+        }
+        .modal-backdrop.open { display: flex; }
+
+        .modal {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            width: 90%;
+            max-width: 500px;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            padding: 1rem 1.25rem;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .modal-title { font-size: 1rem; font-weight: 600; }
+
+        .modal-body { padding: 1.25rem; }
+
+        .modal-footer {
+            padding: 1rem 1.25rem;
+            border-top: 1px solid var(--border);
+            display: flex;
+            justify-content: flex-end;
+            gap: 0.5rem;
+        }
+
+        .form-group { margin-bottom: 1rem; }
+        .form-group:last-child { margin-bottom: 0; }
+
+        .form-label {
+            display: block;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.5rem;
+            font-weight: 600;
+        }
+
+        .form-input, .form-textarea, .form-select {
+            width: 100%;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            padding: 0.625rem 0.75rem;
+            border-radius: 6px;
+            font-size: 0.875rem;
+            font-family: inherit;
+        }
+        .form-input:focus, .form-textarea:focus, .form-select:focus {
+            outline: none;
+            border-color: var(--blue);
+        }
+
+        .form-textarea { min-height: 100px; resize: vertical; }
+
+        .confirm-text {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            line-height: 1.6;
+        }
+
+        .confirm-task-title {
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
         .detail-section { padding: 1rem 1.25rem; border-bottom: 1px solid var(--border); }
         .detail-section:last-child { border-bottom: none; }
         .detail-section-title {
@@ -342,6 +465,67 @@ export const KANBAN_TEMPLATE = `<!DOCTYPE html>
     <div class="detail-backdrop" id="detailBackdrop"></div>
     <div class="detail-panel" id="detailPanel"></div>
     <div class="toast" id="toast"></div>
+
+    <!-- Edit Modal -->
+    <div class="modal-backdrop" id="editModal">
+        <div class="modal">
+            <div class="modal-header">
+                <span class="modal-title">Edit Task</span>
+                <button class="detail-close" onclick="closeEditModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="editTaskId">
+                <div class="form-group">
+                    <label class="form-label">Title</label>
+                    <input type="text" class="form-input" id="editTitle">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Description</label>
+                    <textarea class="form-textarea" id="editDescription"></textarea>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Type</label>
+                    <select class="form-select" id="editType">
+                        <option value="feature">Feature</option>
+                        <option value="bug">Bug</option>
+                        <option value="chore">Chore</option>
+                        <option value="spike">Spike</option>
+                        <option value="test">Test</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Estimate (hours)</label>
+                    <input type="number" class="form-input" id="editEstimate" min="0" step="0.5">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-cancel" onclick="closeEditModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="saveTask()">Save Changes</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Delete Confirmation Modal -->
+    <div class="modal-backdrop" id="deleteModal">
+        <div class="modal">
+            <div class="modal-header">
+                <span class="modal-title">Delete Task</span>
+                <button class="detail-close" onclick="closeDeleteModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="deleteTaskId">
+                <p class="confirm-text">
+                    Are you sure you want to delete this task?<br><br>
+                    <span class="confirm-task-title" id="deleteTaskTitle"></span><br><br>
+                    This action will archive the task. It can be restored via the CLI.
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-cancel" onclick="closeDeleteModal()">Cancel</button>
+                <button class="btn btn-delete" onclick="confirmDelete()">Delete Task</button>
+            </div>
+        </div>
+    </div>
     <script>
         // All data comes from local SQLite (trusted source). esc() escapes HTML chars.
         const REFRESH_INTERVAL = 3000;
@@ -499,7 +683,7 @@ export const KANBAN_TEMPLATE = `<!DOCTYPE html>
                 html += '<span class="detail-badge" style="background:' + (priColors[task.epic_priority]||'var(--text-muted)') + ';color:white">' + esc(task.epic_priority) + '</span>';
             }
             if (task.task_type) html += '<span class="detail-badge" style="background:var(--bg-card)">' + esc(task.task_type) + '</span>';
-            html += '</div></div><button class="detail-close" id="closeBtn">&times;</button></div>';
+            html += '</div><div class="detail-actions"><button class="btn btn-edit" onclick="openEditModal(\\'' + esc(task.id) + '\\')">Edit</button><button class="btn btn-delete" onclick="openDeleteModal(\\'' + esc(task.id) + '\\')">Delete</button></div></div><button class="detail-close" id="closeBtn">&times;</button></div>';
 
             if (task.progress_percent != null) {
                 html += '<div class="detail-section"><div class="detail-section-title">Progress</div><div class="detail-progress"><div class="detail-progress-bar"><div class="detail-progress-fill" style="width:' + (task.progress_percent||0) + '%"></div></div><span class="detail-progress-text">' + (task.progress_percent||0) + '%</span></div></div>';
@@ -555,7 +739,123 @@ export const KANBAN_TEMPLATE = `<!DOCTYPE html>
             } catch(e) { return isoStr; }
         }
 
-        document.addEventListener('keydown', e => { if (e.key === 'Escape' && currentTaskId) closeDetail(); });
+        function showToast(message, isError = false) {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.style.borderColor = isError ? 'var(--red)' : 'var(--green)';
+            toast.classList.add('show');
+            setTimeout(() => toast.classList.remove('show'), 3000);
+        }
+
+        function openEditModal(taskId) {
+            const task = (data.tasks||[]).find(t => t.id === taskId);
+            if (!task) return;
+
+            document.getElementById('editTaskId').value = taskId;
+            document.getElementById('editTitle').value = task.title || '';
+            document.getElementById('editDescription').value = task.description || '';
+            document.getElementById('editType').value = task.task_type || 'feature';
+            document.getElementById('editEstimate').value = task.estimate_hours || '';
+
+            document.getElementById('editModal').classList.add('open');
+        }
+
+        function closeEditModal() {
+            document.getElementById('editModal').classList.remove('open');
+        }
+
+        async function saveTask() {
+            const taskId = document.getElementById('editTaskId').value;
+            const title = document.getElementById('editTitle').value.trim();
+            const description = document.getElementById('editDescription').value.trim();
+            const task_type = document.getElementById('editType').value;
+            const estimate_hours = parseFloat(document.getElementById('editEstimate').value) || null;
+
+            if (!title) {
+                showToast('Title is required', true);
+                return;
+            }
+
+            try {
+                const res = await fetch('/api/tasks/' + encodeURIComponent(taskId), {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title, description, task_type, estimate_hours })
+                });
+
+                const result = await res.json();
+
+                if (res.ok && result.success) {
+                    showToast('Task updated successfully');
+                    closeEditModal();
+                    // Update will happen via file watcher, but update local data for immediate feedback
+                    const task = (data.tasks||[]).find(t => t.id === taskId);
+                    if (task) {
+                        task.title = title;
+                        task.description = description;
+                        task.task_type = task_type;
+                        task.estimate_hours = estimate_hours;
+                        render();
+                        if (currentTaskId === taskId) renderDetailPanel(task);
+                    }
+                } else {
+                    showToast(result.error || 'Failed to update task', true);
+                }
+            } catch (e) {
+                showToast('Failed to update task: ' + e.message, true);
+            }
+        }
+
+        function openDeleteModal(taskId) {
+            const task = (data.tasks||[]).find(t => t.id === taskId);
+            if (!task) return;
+
+            document.getElementById('deleteTaskId').value = taskId;
+            document.getElementById('deleteTaskTitle').textContent = task.title;
+
+            document.getElementById('deleteModal').classList.add('open');
+        }
+
+        function closeDeleteModal() {
+            document.getElementById('deleteModal').classList.remove('open');
+        }
+
+        async function confirmDelete() {
+            const taskId = document.getElementById('deleteTaskId').value;
+
+            try {
+                const res = await fetch('/api/tasks/' + encodeURIComponent(taskId), {
+                    method: 'DELETE'
+                });
+
+                const result = await res.json();
+
+                if (res.ok && result.success) {
+                    showToast('Task deleted successfully');
+                    closeDeleteModal();
+                    closeDetail();
+                    // Remove from local data for immediate feedback
+                    data.tasks = (data.tasks||[]).filter(t => t.id !== taskId);
+                    render();
+                } else {
+                    showToast(result.error || 'Failed to delete task', true);
+                }
+            } catch (e) {
+                showToast('Failed to delete task: ' + e.message, true);
+            }
+        }
+
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Escape') {
+                if (document.getElementById('editModal').classList.contains('open')) {
+                    closeEditModal();
+                } else if (document.getElementById('deleteModal').classList.contains('open')) {
+                    closeDeleteModal();
+                } else if (currentTaskId) {
+                    closeDetail();
+                }
+            }
+        });
         document.addEventListener('DOMContentLoaded', init);
     </script>
 </body>
