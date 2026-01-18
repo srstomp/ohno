@@ -8,6 +8,7 @@ import path from "node:path";
 import { watch } from "chokidar";
 import { out, colors } from "./output.js";
 import { exportDatabase, generateKanbanHtml } from "./kanban.js";
+import { TaskDatabase, type TaskType } from "@stevestomp/ohno-core";
 
 const MIME_TYPES: Record<string, string> = {
   ".html": "text/html",
@@ -20,11 +21,156 @@ const MIME_TYPES: Record<string, string> = {
 };
 
 /**
+ * Parse JSON body from request
+ */
+async function parseJsonBody(req: http.IncomingMessage): Promise<Record<string, unknown>> {
+  return new Promise((resolve, reject) => {
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk.toString();
+    });
+    req.on("end", () => {
+      try {
+        resolve(body ? JSON.parse(body) : {});
+      } catch (e) {
+        reject(new Error("Invalid JSON"));
+      }
+    });
+    req.on("error", reject);
+  });
+}
+
+/**
+ * Send JSON response
+ */
+function sendJson(res: http.ServerResponse, status: number, data: unknown): void {
+  res.writeHead(status, {
+    "Content-Type": "application/json",
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, PUT, DELETE, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+  });
+  res.end(JSON.stringify(data));
+}
+
+/**
+ * Handle API requests
+ */
+async function handleApiRequest(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  ohnoDir: string
+): Promise<boolean> {
+  const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
+  const method = req.method ?? "GET";
+
+  // Handle CORS preflight
+  if (method === "OPTIONS") {
+    res.writeHead(204, {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, PUT, DELETE, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type",
+    });
+    res.end();
+    return true;
+  }
+
+  // Match /api/tasks/:id
+  const taskMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)$/);
+  if (!taskMatch) return false;
+
+  const taskId = taskMatch[1];
+  const dbPath = path.join(ohnoDir, "tasks.db");
+
+  if (!fs.existsSync(dbPath)) {
+    sendJson(res, 404, { error: "Database not found" });
+    return true;
+  }
+
+  try {
+    const db = await TaskDatabase.open(dbPath);
+
+    if (method === "PUT") {
+      // Update task
+      const body = await parseJsonBody(req);
+      const task = db.getTask(taskId);
+
+      if (!task) {
+        db.close();
+        sendJson(res, 404, { error: "Task not found" });
+        return true;
+      }
+
+      // Update allowed fields
+      const validTaskTypes: TaskType[] = ["feature", "bug", "chore", "spike", "test"];
+      const taskType = typeof body.task_type === "string" && validTaskTypes.includes(body.task_type as TaskType)
+        ? (body.task_type as TaskType)
+        : undefined;
+
+      db.updateTask(taskId, {
+        title: typeof body.title === "string" ? body.title : undefined,
+        description: typeof body.description === "string" ? body.description : undefined,
+        task_type: taskType,
+        estimate_hours: typeof body.estimate_hours === "number" ? body.estimate_hours : undefined,
+      });
+
+      db.close();
+      sendJson(res, 200, { success: true, task_id: taskId });
+      return true;
+    }
+
+    if (method === "DELETE") {
+      // Archive task (soft delete)
+      const task = db.getTask(taskId);
+
+      if (!task) {
+        db.close();
+        sendJson(res, 404, { error: "Task not found" });
+        return true;
+      }
+
+      db.archiveTask(taskId, "Deleted from kanban UI");
+      db.close();
+      sendJson(res, 200, { success: true, task_id: taskId });
+      return true;
+    }
+
+    if (method === "GET") {
+      // Get task details
+      const task = db.getTask(taskId);
+      db.close();
+
+      if (!task) {
+        sendJson(res, 404, { error: "Task not found" });
+        return true;
+      }
+
+      sendJson(res, 200, task);
+      return true;
+    }
+
+    db.close();
+    sendJson(res, 405, { error: "Method not allowed" });
+    return true;
+  } catch (error) {
+    sendJson(res, 500, { error: String(error) });
+    return true;
+  }
+}
+
+/**
  * Create HTTP server to serve static files from ohno directory
  */
 export function createHttpServer(ohnoDir: string): http.Server {
-  return http.createServer((req, res) => {
+  return http.createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
+
+    // Handle API requests
+    if (url.pathname.startsWith("/api/")) {
+      await handleApiRequest(req, res, ohnoDir);
+      return;
+    }
+
     let filePath = path.join(ohnoDir, url.pathname === "/" ? "kanban.html" : url.pathname);
 
     // Security: prevent directory traversal
