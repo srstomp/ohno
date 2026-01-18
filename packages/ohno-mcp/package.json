@@ -32,8 +32,7 @@
     "dev": "tsx src/index.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "clean": "rm -rf dist",
-    "prepare": "npm run build"
+    "clean": "rm -rf dist"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
