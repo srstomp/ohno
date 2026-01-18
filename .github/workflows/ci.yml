@@ -22,7 +22,7 @@ jobs:
           cache-dependency-path: packages/package-lock.json
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts
         working-directory: packages
 
       - name: Build

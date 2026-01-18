@@ -413,6 +413,51 @@ describe("MCP Server", () => {
 
         expect(db.getTask(taskId)?.handoff_notes).toBe("Completed successfully");
       });
+
+      it("should return boundaries when completing task with story", async () => {
+        // Set up hierarchy
+        const dbInstance = db as unknown as { db: { run: (sql: string, params?: unknown[]) => void } };
+        dbInstance.db.run(
+          "INSERT INTO epics (id, title, priority) VALUES (?, ?, ?)",
+          ["epic-1", "Epic 1", "P0"]
+        );
+        dbInstance.db.run(
+          "INSERT INTO stories (id, epic_id, title) VALUES (?, ?, ?)",
+          ["story-1", "epic-1", "Story 1"]
+        );
+
+        const taskId = db.createTask({ title: "Test", story_id: "story-1" });
+        const result = await handleTool("update_task_status", {
+          task_id: taskId,
+          status: "done",
+        }) as {
+          success: boolean;
+          boundaries: {
+            story_completed: boolean;
+            epic_completed: boolean;
+            story_id: string | null;
+            epic_id: string | null;
+          };
+        };
+
+        expect(result.success).toBe(true);
+        expect(result.boundaries).toBeDefined();
+        expect(result.boundaries.story_completed).toBe(true);
+        expect(result.boundaries.epic_completed).toBe(true);
+        expect(result.boundaries.story_id).toBe("story-1");
+        expect(result.boundaries.epic_id).toBe("epic-1");
+      });
+
+      it("should not return boundaries for non-completion status changes", async () => {
+        const taskId = db.createTask({ title: "Test" });
+        const result = await handleTool("update_task_status", {
+          task_id: taskId,
+          status: "in_progress",
+        }) as { success: boolean; boundaries?: unknown };
+
+        expect(result.success).toBe(true);
+        expect(result.boundaries).toBeUndefined();
+      });
     });
 
     describe("update_task", () => {

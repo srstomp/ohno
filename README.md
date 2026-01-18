@@ -203,12 +203,35 @@ Run `npx @stevestomp/ohno-cli serve` to view tasks at http://localhost:3333/kanb
 
 | Tool | Description |
 |------|-------------|
-| `update_task_status(task_id, status)` | Change status (todo/in_progress/review/done/blocked) |
+| `update_task_status(task_id, status)` | Change status (todo/in_progress/review/done/blocked). Returns boundary metadata when completing tasks. |
 | `update_task_progress(task_id, percent)` | Update completion percentage |
 | `set_handoff_notes(task_id, notes)` | Leave notes for next session |
 | `add_task_activity(task_id, type, desc)` | Log activity (note/decision/progress) |
 | `set_blocker(task_id, reason)` | Mark task as blocked |
 | `resolve_blocker(task_id)` | Clear blocker, resume work |
+
+### Completion Boundaries
+
+When marking a task as `done` or `archived`, `update_task_status` returns boundary metadata indicating if the task's story or epic was also completed:
+
+```json
+{
+  "success": true,
+  "boundaries": {
+    "story_completed": true,
+    "epic_completed": false,
+    "story_id": "S-45",
+    "epic_id": "E-12"
+  }
+}
+```
+
+This enables Claude Code hooks to trigger appropriate actions at different lifecycle points:
+- **Post-task**: sync, commit
+- **Post-story**: sync, commit, test, mini-audit
+- **Post-epic**: sync, commit, full audit
+
+See [pokayokay](https://github.com/srstomp/pokayokay) for hook integration examples.
 
 ### CRUD Tools
 

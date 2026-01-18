@@ -18,6 +18,8 @@ import type {
   GetTasksOptions,
   TaskStatus,
   DependencyType,
+  TaskCompletionBoundaries,
+  UpdateStatusResult,
 } from "./types.js";
 import {
   generateTaskId,
@@ -410,6 +412,74 @@ export class TaskDatabase {
     return this.getBlockingDependencies(taskId).length > 0;
   }
 
+  /**
+   * Check if all tasks in a story are completed (done or archived)
+   */
+  isStoryCompleted(storyId: string): boolean {
+    const sql = `
+      SELECT COUNT(*) as incomplete_count
+      FROM tasks
+      WHERE story_id = ?
+        AND status NOT IN ('done', 'archived')
+    `;
+    const stmt = this.db.prepare(sql);
+    stmt.bind([storyId]);
+
+    let incompleteCount = 0;
+    if (stmt.step()) {
+      const row = stmt.getAsObject() as { incomplete_count: number };
+      incompleteCount = row.incomplete_count;
+    }
+    stmt.free();
+
+    return incompleteCount === 0;
+  }
+
+  /**
+   * Check if all tasks in an epic are completed (all stories completed)
+   */
+  isEpicCompleted(epicId: string): boolean {
+    const sql = `
+      SELECT COUNT(*) as incomplete_count
+      FROM tasks t
+      JOIN stories s ON t.story_id = s.id
+      WHERE s.epic_id = ?
+        AND t.status NOT IN ('done', 'archived')
+    `;
+    const stmt = this.db.prepare(sql);
+    stmt.bind([epicId]);
+
+    let incompleteCount = 0;
+    if (stmt.step()) {
+      const row = stmt.getAsObject() as { incomplete_count: number };
+      incompleteCount = row.incomplete_count;
+    }
+    stmt.free();
+
+    return incompleteCount === 0;
+  }
+
+  /**
+   * Get completion boundaries for a task
+   * Returns information about whether completing this task completes its story/epic
+   */
+  getCompletionBoundaries(taskId: string): TaskCompletionBoundaries | null {
+    const task = this.getTask(taskId);
+    if (!task) {
+      return null;
+    }
+
+    const storyId = task.story_id ?? null;
+    const epicId = task.epic_id ?? null;
+
+    return {
+      story_completed: storyId ? this.isStoryCompleted(storyId) : false,
+      epic_completed: epicId ? this.isEpicCompleted(epicId) : false,
+      story_id: storyId,
+      epic_id: epicId,
+    };
+  }
+
   // ==========================================================================
   // Mutation Methods
   // ==========================================================================
@@ -495,11 +565,12 @@ export class TaskDatabase {
 
   /**
    * Update task status
+   * Returns UpdateStatusResult with boundary metadata when completing a task
    */
-  updateTaskStatus(taskId: string, status: TaskStatus, notes?: string, actor?: string): boolean {
+  updateTaskStatus(taskId: string, status: TaskStatus, notes?: string, actor?: string): UpdateStatusResult {
     const task = this.getTask(taskId);
     if (!task) {
-      return false;
+      return { success: false };
     }
 
     const oldStatus = task.status;
@@ -530,9 +601,17 @@ export class TaskDatabase {
       }
 
       this.save();
+
+      // Return boundary metadata when marking as done or archived
+      if (status === "done" || status === "archived") {
+        const boundaries = this.getCompletionBoundaries(taskId);
+        if (boundaries) {
+          return { success: true, boundaries };
+        }
+      }
     }
 
-    return changes > 0;
+    return { success: changes > 0 };
   }
 
   /**

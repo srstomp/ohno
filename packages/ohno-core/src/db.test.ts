@@ -495,6 +495,190 @@ describe("TaskDatabase", () => {
     });
   });
 
+  describe("Completion Boundaries", () => {
+    // Helper function to set up hierarchy: epic -> story -> tasks
+    const setupHierarchy = () => {
+      // Access the private db property for direct SQL
+      const dbInstance = db as unknown as { db: { run: (sql: string, params?: unknown[]) => void } };
+
+      // Create an epic
+      dbInstance.db.run(
+        "INSERT INTO epics (id, title, priority) VALUES (?, ?, ?)",
+        ["epic-1", "Epic 1", "P0"]
+      );
+
+      // Create a story
+      dbInstance.db.run(
+        "INSERT INTO stories (id, epic_id, title) VALUES (?, ?, ?)",
+        ["story-1", "epic-1", "Story 1"]
+      );
+
+      // Create another story in the same epic
+      dbInstance.db.run(
+        "INSERT INTO stories (id, epic_id, title) VALUES (?, ?, ?)",
+        ["story-2", "epic-1", "Story 2"]
+      );
+    };
+
+    describe("isStoryCompleted", () => {
+      it("should return false when tasks are incomplete", () => {
+        setupHierarchy();
+
+        db.createTask({ title: "Task 1", story_id: "story-1" });
+        db.createTask({ title: "Task 2", story_id: "story-1" });
+
+        expect(db.isStoryCompleted("story-1")).toBe(false);
+      });
+
+      it("should return true when all tasks are done", () => {
+        setupHierarchy();
+
+        const task1 = db.createTask({ title: "Task 1", story_id: "story-1" });
+        const task2 = db.createTask({ title: "Task 2", story_id: "story-1" });
+
+        db.updateTaskStatus(task1, "done");
+        db.updateTaskStatus(task2, "done");
+
+        expect(db.isStoryCompleted("story-1")).toBe(true);
+      });
+
+      it("should return true when all tasks are archived", () => {
+        setupHierarchy();
+
+        const task1 = db.createTask({ title: "Task 1", story_id: "story-1" });
+        db.archiveTask(task1);
+
+        expect(db.isStoryCompleted("story-1")).toBe(true);
+      });
+
+      it("should return true for story with no tasks", () => {
+        setupHierarchy();
+
+        expect(db.isStoryCompleted("story-1")).toBe(true);
+      });
+    });
+
+    describe("isEpicCompleted", () => {
+      it("should return false when tasks in any story are incomplete", () => {
+        setupHierarchy();
+
+        const task1 = db.createTask({ title: "Task 1", story_id: "story-1" });
+        const task2 = db.createTask({ title: "Task 2", story_id: "story-2" });
+
+        db.updateTaskStatus(task1, "done");
+        // task2 is still todo
+
+        expect(db.isEpicCompleted("epic-1")).toBe(false);
+      });
+
+      it("should return true when all tasks in all stories are done", () => {
+        setupHierarchy();
+
+        const task1 = db.createTask({ title: "Task 1", story_id: "story-1" });
+        const task2 = db.createTask({ title: "Task 2", story_id: "story-2" });
+
+        db.updateTaskStatus(task1, "done");
+        db.updateTaskStatus(task2, "done");
+
+        expect(db.isEpicCompleted("epic-1")).toBe(true);
+      });
+
+      it("should return true for epic with no tasks", () => {
+        setupHierarchy();
+
+        expect(db.isEpicCompleted("epic-1")).toBe(true);
+      });
+    });
+
+    describe("getCompletionBoundaries", () => {
+      it("should return null for non-existent task", () => {
+        expect(db.getCompletionBoundaries("non-existent")).toBeNull();
+      });
+
+      it("should return false for both when task has no story", () => {
+        const taskId = db.createTask({ title: "Orphan task" });
+        db.updateTaskStatus(taskId, "done");
+
+        const boundaries = db.getCompletionBoundaries(taskId);
+        expect(boundaries).toEqual({
+          story_completed: false,
+          epic_completed: false,
+          story_id: null,
+          epic_id: null,
+        });
+      });
+
+      it("should return story_completed when completing last task in story", () => {
+        setupHierarchy();
+
+        const task1 = db.createTask({ title: "Task 1", story_id: "story-1" });
+        const task2 = db.createTask({ title: "Task 2", story_id: "story-1" });
+
+        db.updateTaskStatus(task1, "done");
+        db.updateTaskStatus(task2, "done");
+
+        const boundaries = db.getCompletionBoundaries(task2);
+        expect(boundaries?.story_completed).toBe(true);
+        expect(boundaries?.story_id).toBe("story-1");
+      });
+
+      it("should return epic_completed when completing last task in epic", () => {
+        setupHierarchy();
+
+        const task1 = db.createTask({ title: "Task 1", story_id: "story-1" });
+        const task2 = db.createTask({ title: "Task 2", story_id: "story-2" });
+
+        db.updateTaskStatus(task1, "done");
+        db.updateTaskStatus(task2, "done");
+
+        const boundaries = db.getCompletionBoundaries(task2);
+        expect(boundaries?.story_completed).toBe(true);
+        expect(boundaries?.epic_completed).toBe(true);
+        expect(boundaries?.epic_id).toBe("epic-1");
+      });
+    });
+
+    describe("updateTaskStatus with boundaries", () => {
+      it("should return boundaries when marking task as done", () => {
+        setupHierarchy();
+
+        const taskId = db.createTask({ title: "Task 1", story_id: "story-1" });
+        const result = db.updateTaskStatus(taskId, "done");
+
+        expect(result.success).toBe(true);
+        expect(result.boundaries).toBeDefined();
+        expect(result.boundaries?.story_completed).toBe(true);
+        expect(result.boundaries?.story_id).toBe("story-1");
+      });
+
+      it("should return boundaries when archiving task", () => {
+        setupHierarchy();
+
+        const taskId = db.createTask({ title: "Task 1", story_id: "story-1" });
+
+        // Update status to archived (not using archiveTask helper)
+        const result = db.updateTaskStatus(taskId, "archived");
+
+        expect(result.success).toBe(true);
+        expect(result.boundaries).toBeDefined();
+      });
+
+      it("should not return boundaries for non-completion status changes", () => {
+        const taskId = db.createTask({ title: "Task 1" });
+        const result = db.updateTaskStatus(taskId, "in_progress");
+
+        expect(result.success).toBe(true);
+        expect(result.boundaries).toBeUndefined();
+      });
+
+      it("should return success false for non-existent task", () => {
+        const result = db.updateTaskStatus("non-existent", "done");
+        expect(result.success).toBe(false);
+        expect(result.boundaries).toBeUndefined();
+      });
+    });
+  });
+
   describe("Project Status", () => {
     describe("getProjectStatus", () => {
       it("should return correct task counts", () => {
