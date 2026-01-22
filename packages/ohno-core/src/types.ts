@@ -40,9 +40,11 @@ export interface Task {
   activity_summary?: string;
   // Joined fields from relationships
   story_title?: string;
+  story_status?: TaskStatus;
   epic_id?: string;
   epic_title?: string;
   epic_priority?: Priority;
+  epic_status?: TaskStatus;
 }
 
 /**
@@ -132,6 +134,8 @@ export interface GetTasksOptions {
   status?: TaskStatus;
   epic_id?: string;
   priority?: Priority;
+  story_status?: TaskStatus;
+  epic_status?: TaskStatus;
   limit?: number;
 }
 

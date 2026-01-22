@@ -140,9 +140,11 @@ export const GET_TASKS_WITH_JOINS = `
 SELECT
   t.*,
   s.title as story_title,
+  s.status as story_status,
   e.id as epic_id,
   e.title as epic_title,
-  e.priority as epic_priority
+  e.priority as epic_priority,
+  e.status as epic_status
 FROM tasks t
 LEFT JOIN stories s ON t.story_id = s.id
 LEFT JOIN epics e ON s.epic_id = e.id
@@ -155,9 +157,11 @@ export const GET_TASK_BY_ID = `
 SELECT
   t.*,
   s.title as story_title,
+  s.status as story_status,
   e.id as epic_id,
   e.title as epic_title,
-  e.priority as epic_priority
+  e.priority as epic_priority,
+  e.status as epic_status
 FROM tasks t
 LEFT JOIN stories s ON t.story_id = s.id
 LEFT JOIN epics e ON s.epic_id = e.id
