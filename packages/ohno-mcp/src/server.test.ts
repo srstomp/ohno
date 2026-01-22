@@ -47,8 +47,8 @@ describe("MCP Server", () => {
   });
 
   describe("Tool Definitions", () => {
-    it("should have 20 tools defined", () => {
-      expect(TOOLS.length).toBe(20);
+    it("should have 25 tools defined", () => {
+      expect(TOOLS.length).toBe(25);
     });
 
     it("should have unique tool names", () => {

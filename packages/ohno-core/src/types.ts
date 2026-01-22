@@ -128,6 +128,40 @@ export interface CreateStoryOptions {
 }
 
 /**
+ * Epic record - high-level grouping of stories
+ */
+export interface Epic {
+  id: string;
+  project_id?: string;
+  title: string;
+  description?: string;
+  priority?: Priority;
+  status?: TaskStatus;
+  created_at?: string;
+  updated_at?: string;
+}
+
+/**
+ * Options for creating a new epic
+ */
+export interface CreateEpicOptions {
+  title: string;
+  project_id?: string;
+  description?: string;
+  priority?: Priority;
+  actor?: string;
+}
+
+/**
+ * Options for querying epics
+ */
+export interface GetEpicsOptions {
+  status?: TaskStatus;
+  priority?: Priority;
+  limit?: number;
+}
+
+/**
  * Options for querying tasks
  */
 export interface GetTasksOptions {

@@ -15,6 +15,8 @@ import { TaskDatabase, findDbPath, type TaskStatus, type DependencyType } from "
 const GetTasksSchema = z.object({
   status: z.enum(["todo", "in_progress", "review", "done", "blocked"]).optional(),
   priority: z.enum(["P0", "P1", "P2", "P3"]).optional(),
+  story_status: z.enum(["todo", "in_progress", "review", "done", "blocked"]).optional(),
+  epic_status: z.enum(["todo", "in_progress", "review", "done", "blocked"]).optional(),
   limit: z.number().min(1).max(100).default(50),
 });
 
@@ -93,6 +95,36 @@ const SummarizeSchema = z.object({
   delete_raw: z.boolean().default(false),
 });
 
+const CreateEpicSchema = z.object({
+  title: z.string().min(1),
+  project_id: z.string().optional(),
+  description: z.string().optional(),
+  priority: z.enum(["P0", "P1", "P2", "P3"]).optional(),
+});
+
+const EpicIdSchema = z.object({
+  epic_id: z.string().min(1),
+});
+
+const UpdateEpicSchema = z.object({
+  epic_id: z.string().min(1),
+  title: z.string().optional(),
+  description: z.string().optional(),
+  priority: z.enum(["P0", "P1", "P2", "P3"]).optional(),
+  status: z.enum(["todo", "in_progress", "review", "done", "blocked"]).optional(),
+});
+
+const GetEpicsSchema = z.object({
+  status: z.enum(["todo", "in_progress", "review", "done", "blocked"]).optional(),
+  priority: z.enum(["P0", "P1", "P2", "P3"]).optional(),
+  limit: z.number().min(1).max(100).default(50),
+});
+
+const KanbanBoardSchema = z.object({
+  include_done: z.boolean().default(false),
+  limit_per_column: z.number().min(1).max(50).default(20),
+});
+
 // Tool definitions
 const TOOLS = [
   {
@@ -107,12 +139,14 @@ const TOOLS = [
   },
   {
     name: "get_tasks",
-    description: "List tasks with optional filtering by status and priority",
+    description: "List tasks with optional filtering by status, priority, story_status, and epic_status",
     inputSchema: {
       type: "object" as const,
       properties: {
-        status: { type: "string", enum: ["todo", "in_progress", "review", "done", "blocked"], description: "Filter by status" },
-        priority: { type: "string", enum: ["P0", "P1", "P2", "P3"], description: "Filter by priority" },
+        status: { type: "string", enum: ["todo", "in_progress", "review", "done", "blocked"], description: "Filter by task status" },
+        priority: { type: "string", enum: ["P0", "P1", "P2", "P3"], description: "Filter by epic priority" },
+        story_status: { type: "string", enum: ["todo", "in_progress", "review", "done", "blocked"], description: "Filter by parent story status" },
+        epic_status: { type: "string", enum: ["todo", "in_progress", "review", "done", "blocked"], description: "Filter by parent epic status" },
         limit: { type: "number", description: "Maximum tasks to return (1-100)", default: 50 },
       },
     },
@@ -241,6 +275,69 @@ const TOOLS = [
     },
   },
   {
+    name: "create_epic",
+    description: "Create a new epic to organize stories under",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        title: { type: "string", description: "Epic title" },
+        project_id: { type: "string", description: "Optional project ID" },
+        description: { type: "string", description: "Epic description" },
+        priority: { type: "string", enum: ["P0", "P1", "P2", "P3"], description: "Epic priority", default: "P2" },
+      },
+      required: ["title"],
+    },
+  },
+  {
+    name: "get_epic",
+    description: "Get full details for a specific epic by ID",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        epic_id: { type: "string", description: "Epic ID" },
+      },
+      required: ["epic_id"],
+    },
+  },
+  {
+    name: "get_epics",
+    description: "List epics with optional filtering by status and priority",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        status: { type: "string", enum: ["todo", "in_progress", "review", "done", "blocked"], description: "Filter by status" },
+        priority: { type: "string", enum: ["P0", "P1", "P2", "P3"], description: "Filter by priority" },
+        limit: { type: "number", description: "Maximum epics to return (1-100)", default: 50 },
+      },
+    },
+  },
+  {
+    name: "update_epic",
+    description: "Update epic fields (title, description, priority, status)",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        epic_id: { type: "string", description: "Epic ID" },
+        title: { type: "string", description: "New title" },
+        description: { type: "string", description: "New description" },
+        priority: { type: "string", enum: ["P0", "P1", "P2", "P3"], description: "New priority" },
+        status: { type: "string", enum: ["todo", "in_progress", "review", "done", "blocked"], description: "New status" },
+      },
+      required: ["epic_id"],
+    },
+  },
+  {
+    name: "get_kanban_board",
+    description: "Get tasks organized as a kanban board with columns for each status",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        include_done: { type: "boolean", description: "Include done tasks in results", default: false },
+        limit_per_column: { type: "number", description: "Maximum tasks per column (1-50)", default: 20 },
+      },
+    },
+  },
+  {
     name: "update_task",
     description: "Update task fields (title, description, task_type, estimate_hours)",
     inputSchema: {
@@ -324,6 +421,11 @@ export {
   UpdateStatusSchema,
   CreateTaskSchema,
   CreateStorySchema,
+  CreateEpicSchema,
+  EpicIdSchema,
+  UpdateEpicSchema,
+  GetEpicsSchema,
+  KanbanBoardSchema,
   UpdateTaskSchema,
   ActivitySchema,
   HandoffNotesSchema,
@@ -456,6 +558,60 @@ export async function handleTool(name: string, args: Record<string, unknown>): P
       const parsed = CreateStorySchema.parse(args);
       const storyId = database.createStory(parsed);
       return { success: true, story_id: storyId };
+    }
+
+    case "create_epic": {
+      const parsed = CreateEpicSchema.parse(args);
+      const epicId = database.createEpic(parsed);
+      return { success: true, epic_id: epicId };
+    }
+
+    case "get_epic": {
+      const parsed = EpicIdSchema.parse(args);
+      const epic = database.getEpic(parsed.epic_id);
+      if (!epic) {
+        return { error: `Epic not found: ${parsed.epic_id}` };
+      }
+      return epic;
+    }
+
+    case "get_epics": {
+      const parsed = GetEpicsSchema.parse(args);
+      return { epics: database.getEpics(parsed) };
+    }
+
+    case "update_epic": {
+      const parsed = UpdateEpicSchema.parse(args);
+      const { epic_id, ...updates } = parsed;
+      const success = database.updateEpic(epic_id, updates);
+      return { success };
+    }
+
+    case "get_kanban_board": {
+      const parsed = KanbanBoardSchema.parse(args);
+      const limit = parsed.limit_per_column;
+
+      const columns: Record<string, unknown[]> = {
+        todo: database.getTasks({ status: "todo", limit }),
+        in_progress: database.getTasks({ status: "in_progress", limit }),
+        review: database.getTasks({ status: "review", limit }),
+        blocked: database.getTasks({ status: "blocked", limit }),
+      };
+
+      if (parsed.include_done) {
+        columns.done = database.getTasks({ status: "done", limit });
+      }
+
+      const stats = {
+        todo_count: columns.todo.length,
+        in_progress_count: columns.in_progress.length,
+        review_count: columns.review.length,
+        blocked_count: columns.blocked.length,
+        ...(parsed.include_done ? { done_count: columns.done?.length ?? 0 } : {}),
+        total_active: columns.todo.length + columns.in_progress.length + columns.review.length + columns.blocked.length,
+      };
+
+      return { columns, stats };
     }
 
     case "update_task": {

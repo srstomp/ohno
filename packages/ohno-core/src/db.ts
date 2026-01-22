@@ -16,17 +16,21 @@ import type {
   SessionContext,
   CreateTaskOptions,
   CreateStoryOptions,
+  CreateEpicOptions,
   GetTasksOptions,
+  GetEpicsOptions,
   TaskStatus,
   DependencyType,
   TaskCompletionBoundaries,
   UpdateStatusResult,
+  Epic,
 } from "./types.js";
 import {
   generateTaskId,
   generateActivityId,
   generateDependencyId,
   generateStoryId,
+  generateEpicId,
   getTimestamp,
   sortByPriority,
 } from "./utils.js";
@@ -582,6 +586,136 @@ export class TaskDatabase {
 
     stmt.free();
     return null;
+  }
+
+  /**
+   * Get a single epic by ID
+   */
+  getEpic(epicId: string): Epic | null {
+    const sql = "SELECT * FROM epics WHERE id = ?";
+    const stmt = this.db.prepare(sql);
+    stmt.bind([epicId]);
+
+    if (stmt.step()) {
+      const row = stmt.getAsObject() as unknown as Epic;
+      stmt.free();
+      return row;
+    }
+
+    stmt.free();
+    return null;
+  }
+
+  /**
+   * Get epics with optional filtering
+   */
+  getEpics(opts: GetEpicsOptions = {}): Epic[] {
+    const { status, priority, limit = 50 } = opts;
+
+    let sql = "SELECT * FROM epics";
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+
+    if (status) {
+      conditions.push("status = ?");
+      params.push(status);
+    }
+
+    if (priority) {
+      conditions.push("priority = ?");
+      params.push(priority);
+    }
+
+    if (conditions.length > 0) {
+      sql += ` WHERE ${conditions.join(" AND ")}`;
+    }
+
+    sql += " ORDER BY updated_at DESC, created_at DESC";
+    sql += " LIMIT ?";
+    params.push(limit);
+
+    const stmt = this.db.prepare(sql);
+    stmt.bind(params as initSqlJs.BindParams);
+
+    const rows: Epic[] = [];
+    while (stmt.step()) {
+      rows.push(stmt.getAsObject() as unknown as Epic);
+    }
+    stmt.free();
+
+    return rows;
+  }
+
+  /**
+   * Create a new epic
+   */
+  createEpic(opts: CreateEpicOptions): string {
+    const timestamp = getTimestamp();
+    let epicId = generateEpicId(opts.title, opts.project_id ?? null, timestamp);
+
+    // Handle collision by appending counter
+    let counter = 0;
+    while (this.getEpic(epicId) !== null) {
+      counter++;
+      epicId = generateEpicId(opts.title, opts.project_id ?? null, `${timestamp}-${counter}`);
+    }
+
+    const sql = `
+      INSERT INTO epics (id, project_id, title, description, priority, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, 'todo', ?, ?)
+    `;
+
+    this.db.run(sql, [
+      epicId,
+      opts.project_id ?? null,
+      opts.title,
+      opts.description ?? null,
+      opts.priority ?? "P2",
+      timestamp,
+      timestamp,
+    ]);
+
+    this.save();
+    return epicId;
+  }
+
+  /**
+   * Update epic fields
+   */
+  updateEpic(epicId: string, updates: Partial<Epic>): boolean {
+    const epic = this.getEpic(epicId);
+    if (!epic) {
+      return false;
+    }
+
+    const allowedFields = ["title", "description", "priority", "status"];
+    const setClauses: string[] = [];
+    const params: unknown[] = [];
+
+    for (const field of allowedFields) {
+      if (field in updates && updates[field as keyof Epic] !== undefined) {
+        setClauses.push(`${field} = ?`);
+        params.push(updates[field as keyof Epic]);
+      }
+    }
+
+    if (setClauses.length === 0) {
+      return false;
+    }
+
+    setClauses.push("updated_at = ?");
+    params.push(getTimestamp());
+    params.push(epicId);
+
+    const sql = `UPDATE epics SET ${setClauses.join(", ")} WHERE id = ?`;
+    this.db.run(sql, params as initSqlJs.BindParams);
+
+    const changes = this.db.getRowsModified();
+    if (changes > 0) {
+      this.save();
+    }
+
+    return changes > 0;
   }
 
   /**

@@ -12,7 +12,9 @@ export type {
   SessionContext,
   CreateTaskOptions,
   CreateStoryOptions,
+  CreateEpicOptions,
   GetTasksOptions,
+  GetEpicsOptions,
   TaskStatus,
   TaskType,
   Priority,
@@ -20,6 +22,7 @@ export type {
   DependencyType,
   TaskCompletionBoundaries,
   UpdateStatusResult,
+  Epic,
 } from "./types.js";
 
 export { toDict } from "./types.js";
@@ -29,6 +32,7 @@ export {
   generateActivityId,
   generateDependencyId,
   generateStoryId,
+  generateEpicId,
   getTimestamp,
   findOhnoDir,
   findDbPath,
