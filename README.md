@@ -63,7 +63,7 @@ Ohno provides multiple integration options:
 
 | Feature | Description | Technical Details |
 |---------|-------------|-------------------|
-| **Multi-Channel Access** | Access task state via MCP tools, CLI commands, or visual board | MCP server (19 tools), CLI (14 commands), HTTP server with live reload |
+| **Multi-Channel Access** | Access task state via MCP tools, CLI commands, or visual board | MCP server (20 tools), CLI (14 commands), HTTP server with live reload |
 | **Session Continuity** | Survive context compaction and session boundaries | Persistent SQLite database with handoff notes, context summaries, and activity logs |
 | **Zero Installation** | Run without install via npx | Published to npm as `@stevestomp/ohno-cli` and `@stevestomp/ohno-mcp` |
 | **No Native Dependencies** | Works on any Node.js version without build tools | Pure JavaScript SQLite (sql.js/WebAssembly) - no compilation required |
@@ -98,7 +98,7 @@ Ohno provides multiple integration options:
 
 | Feature | Description | Technical Details |
 |---------|-------------|-------------------|
-| **MCP Native** | First-class Claude Code integration | Implements Model Context Protocol with 19 tools |
+| **MCP Native** | First-class Claude Code integration | Implements Model Context Protocol with 20 tools |
 | **GitHub Actions** | Ready for CI/CD | Install script via `/install-github-app` command |
 | **CLI Automation** | Scriptable task management | Shell commands with exit codes and JSON output |
 | **Local-First** | No cloud dependencies | SQLite database in `.ohno/tasks.db` |
@@ -237,7 +237,8 @@ See [pokayokay](https://github.com/srstomp/pokayokay) for hook integration examp
 
 | Tool | Description |
 |------|-------------|
-| `create_task(title, ...)` | Create new task discovered during work |
+| `create_story(title, epic_id?, description?)` | Create a new story to organize tasks under |
+| `create_task(title, story_id?, ...)` | Create new task, optionally under a story |
 | `update_task(task_id, ...)` | Modify task details |
 | `archive_task(task_id, reason)` | Archive task no longer needed |
 
@@ -317,7 +318,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for full schema details.
 ```
 packages/
 ├── ohno-core/    # Shared database layer (TypeScript)
-├── ohno-mcp/     # MCP server with 19 tools
+├── ohno-mcp/     # MCP server with 20 tools
 └── ohno-cli/     # CLI with 14 commands
 ```
 

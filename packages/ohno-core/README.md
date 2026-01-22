@@ -25,9 +25,16 @@ import { TaskDatabase } from '@stevestomp/ohno-core';
 // Open or create database
 const db = await TaskDatabase.open('/path/to/.ohno/tasks.db');
 
-// Create a task
+// Create a story to organize tasks
+const storyId = db.createStory({
+  title: 'User Authentication',
+  description: 'Implement login and signup flows'
+});
+
+// Create a task under the story
 const taskId = db.createTask({
   title: 'Fix the bug',
+  story_id: storyId,
   task_type: 'bug',
   description: 'Login fails on mobile'
 });
@@ -55,6 +62,10 @@ db.close();
 ```typescript
 // Factory method (async)
 static async open(dbPath: string): Promise<TaskDatabase>
+
+// Story operations
+createStory(options: CreateStoryOptions): string
+getStory(storyId: string): Story | null
 
 // Task operations
 createTask(options: CreateTaskOptions): string

@@ -16,6 +16,7 @@ import {
   TaskIdSchema,
   UpdateStatusSchema,
   CreateTaskSchema,
+  CreateStorySchema,
   UpdateTaskSchema,
   ActivitySchema,
   HandoffNotesSchema,
@@ -46,8 +47,8 @@ describe("MCP Server", () => {
   });
 
   describe("Tool Definitions", () => {
-    it("should have 19 tools defined", () => {
-      expect(TOOLS.length).toBe(19);
+    it("should have 20 tools defined", () => {
+      expect(TOOLS.length).toBe(20);
     });
 
     it("should have unique tool names", () => {
@@ -80,6 +81,7 @@ describe("MCP Server", () => {
         "set_blocker",
         "resolve_blocker",
         "create_task",
+        "create_story",
         "update_task",
         "archive_task",
         "add_dependency",
@@ -204,6 +206,27 @@ describe("MCP Server", () => {
         expect(() =>
           CreateTaskSchema.parse({ title: "Task", task_type: "invalid" })
         ).toThrow(ZodError);
+      });
+    });
+
+    describe("CreateStorySchema", () => {
+      it("should accept minimal story", () => {
+        const result = CreateStorySchema.parse({ title: "New story" });
+        expect(result.title).toBe("New story");
+      });
+
+      it("should accept all fields", () => {
+        const result = CreateStorySchema.parse({
+          title: "Full story",
+          epic_id: "epic-1",
+          description: "Story description",
+        });
+        expect(result.epic_id).toBe("epic-1");
+        expect(result.description).toBe("Story description");
+      });
+
+      it("should reject empty title", () => {
+        expect(() => CreateStorySchema.parse({ title: "" })).toThrow(ZodError);
       });
     });
 
@@ -388,6 +411,44 @@ describe("MCP Server", () => {
         const task = db.getTask(result.task_id);
         expect(task?.task_type).toBe("bug");
         expect(task?.estimate_hours).toBe(4);
+      });
+    });
+
+    describe("create_story", () => {
+      it("should create story and return ID", async () => {
+        const result = await handleTool("create_story", { title: "New story" }) as {
+          success: boolean;
+          story_id: string;
+        };
+        expect(result.success).toBe(true);
+        expect(result.story_id).toMatch(/^story-[a-f0-9]{8}$/);
+      });
+
+      it("should create story with all options", async () => {
+        const result = await handleTool("create_story", {
+          title: "Full story",
+          epic_id: "epic-1",
+          description: "Story description",
+        }) as { success: boolean; story_id: string };
+
+        expect(result.success).toBe(true);
+        expect(result.story_id).toMatch(/^story-[a-f0-9]{8}$/);
+      });
+
+      it("should allow creating task with story_id", async () => {
+        const storyResult = await handleTool("create_story", { title: "My story" }) as {
+          success: boolean;
+          story_id: string;
+        };
+
+        const taskResult = await handleTool("create_task", {
+          title: "Task in story",
+          story_id: storyResult.story_id,
+        }) as { success: boolean; task_id: string };
+
+        expect(taskResult.success).toBe(true);
+        const task = db.getTask(taskResult.task_id);
+        expect(task?.story_id).toBe(storyResult.story_id);
       });
     });
 
