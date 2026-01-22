@@ -621,4 +621,38 @@ describe("CLI Commands", () => {
       expect(parsed.is_blocked).toBe(true);
     });
   });
+
+  describe("kanban command", () => {
+    it("should have kanban command", () => {
+      const program = createCli();
+      const commands = program.commands.map((c) => c.name());
+      expect(commands).toContain("kanban");
+    });
+
+    it("should output static kanban in JSON mode", async () => {
+      db.createTask({ title: "Test task" });
+      const inProgressId = db.createTask({ title: "Active task" });
+      db.updateTaskStatus(inProgressId, "in_progress");
+
+      const program = createCli();
+      program.exitOverride();
+
+      await program.parseAsync(["node", "test", "--json", "-d", tempDir, "kanban"]);
+
+      expect(consoleLogSpy).toHaveBeenCalled();
+      const output = getConsoleOutput(consoleLogSpy);
+      const parsed = JSON.parse(output);
+      expect(parsed.todo).toHaveLength(1);
+      expect(parsed.inProgress).toHaveLength(1);
+    });
+
+    it("should accept --watch flag", () => {
+      const program = createCli();
+      const kanbanCmd = program.commands.find((c) => c.name() === "kanban");
+      expect(kanbanCmd).toBeDefined();
+
+      const watchOption = kanbanCmd?.options.find((o) => o.long === "--watch");
+      expect(watchOption).toBeDefined();
+    });
+  });
 });

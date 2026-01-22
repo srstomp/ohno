@@ -43,7 +43,7 @@ Ohno is a TypeScript monorepo providing task management for AI agent workflows w
 ```
 packages/
 ├── ohno-core/       # Shared database layer (better-sqlite3)
-├── ohno-mcp/        # MCP server (19 tools)
+├── ohno-mcp/        # MCP server (20 tools)
 └── ohno-cli/        # CLI tool (17 commands)
 ```
 
@@ -121,7 +121,7 @@ task_dependencies     -- Task relationships (blocks, requires, relates_to)
 
 ### 4. MCP Server (ohno-mcp)
 
-**Decision: Model Context Protocol server with 19 tools**
+**Decision: Model Context Protocol server with 20 tools**
 
 **Tool Categories:**
 
@@ -130,7 +130,7 @@ task_dependencies     -- Task relationships (blocks, requires, relates_to)
 | **Query** | get_project_status, get_session_context, get_tasks, get_task, get_next_task, get_blocked_tasks | Read task state |
 | **Status Updates** | update_task_status, update_task_progress, set_blocker, resolve_blocker | Track progress |
 | **Activity Logging** | add_task_activity, set_handoff_notes, summarize_task_activity | Session continuity |
-| **CRUD** | create_task, update_task, archive_task | Manage tasks |
+| **CRUD** | create_story, create_task, update_task, archive_task | Manage stories and tasks |
 | **Dependencies** | add_dependency, remove_dependency, get_task_dependencies | Task relationships |
 
 **Key Features:**

@@ -116,6 +116,16 @@ export interface CreateTaskOptions {
 }
 
 /**
+ * Options for creating a new story
+ */
+export interface CreateStoryOptions {
+  title: string;
+  epic_id?: string;
+  description?: string;
+  actor?: string;
+}
+
+/**
  * Options for querying tasks
  */
 export interface GetTasksOptions {
