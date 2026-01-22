@@ -36,14 +36,17 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@stevestomp/ohno-core": "*",
     "chalk": "^5.4.0",
     "chokidar": "^4.0.0",
     "commander": "^12.1.0",
-    "sql.js": "^1.11.0",
-    "@stevestomp/ohno-core": "*"
+    "ink": "^4.4.1",
+    "react": "^18.3.1",
+    "sql.js": "^1.11.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "@types/react": "^18.3.27",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0"
   },
