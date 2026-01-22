@@ -67,3 +67,4 @@ htmlcov/
 
 .playwright-mcp
 packages/.turbo/
+docs/

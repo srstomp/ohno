@@ -235,7 +235,7 @@ export class TaskDatabase {
    * Get tasks with optional filtering
    */
   getTasks(opts: GetTasksOptions = {}): Task[] {
-    const { status, epic_id, priority, limit = 50 } = opts;
+    const { status, epic_id, priority, story_status, epic_status, limit = 50 } = opts;
 
     let sql = GET_TASKS_WITH_JOINS;
     const conditions: string[] = ["t.status != 'archived'"];
@@ -254,6 +254,16 @@ export class TaskDatabase {
     if (priority) {
       conditions.push("e.priority = ?");
       params.push(priority);
+    }
+
+    if (story_status) {
+      conditions.push("s.status = ?");
+      params.push(story_status);
+    }
+
+    if (epic_status) {
+      conditions.push("e.status = ?");
+      params.push(epic_status);
     }
 
     sql += ` WHERE ${conditions.join(" AND ")}`;
