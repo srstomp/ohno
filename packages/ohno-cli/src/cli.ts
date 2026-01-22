@@ -105,6 +105,34 @@ export function createCli(): Command {
     });
 
   program
+    .command("kanban")
+    .description("Display kanban board in terminal")
+    .option("-w, --watch", "Live updating mode with interactivity")
+    .action(async (options, command) => {
+      const globalOpts = command.parent?.opts() ?? {};
+      const ohnoDir = getOhnoDir(globalOpts.dir);
+      const dbPath = `${ohnoDir}/tasks.db`;
+
+      const { getKanbanData } = await import("./tui/kanban-data.js");
+      const data = await getKanbanData(dbPath);
+
+      if (globalOpts.json) {
+        out.json(data);
+        return;
+      }
+
+      if (options.watch) {
+        // Watch mode - to be implemented
+        const { runKanbanTui } = await import("./tui/kanban-app.js");
+        await runKanbanTui(dbPath);
+      } else {
+        // Static mode - print and exit
+        const { renderStaticKanban } = await import("./tui/kanban-static.js");
+        renderStaticKanban(data);
+      }
+    });
+
+  program
     .command("status")
     .description("Show project statistics")
     .action(async (options, command) => {
