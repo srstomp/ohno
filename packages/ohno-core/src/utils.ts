@@ -39,6 +39,16 @@ export function generateDependencyId(taskId: string, dependsOnTaskId: string): s
 }
 
 /**
+ * Generate a content-based story ID
+ * Format: story-{sha256[:8]}
+ */
+export function generateStoryId(title: string, epicId: string | null, timestamp: string): string {
+  const content = `${title}|${epicId ?? ""}|${timestamp}`;
+  const hash = crypto.createHash("sha256").update(content).digest("hex");
+  return `story-${hash.slice(0, 8)}`;
+}
+
+/**
  * Get current ISO timestamp
  */
 export function getTimestamp(): string {

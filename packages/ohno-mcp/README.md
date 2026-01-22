@@ -35,7 +35,7 @@ Or for a specific project (`.claude/settings.local.json` or `.mcp.json`):
 }
 ```
 
-## MCP Tools (19 total)
+## MCP Tools (20 total)
 
 ### Query Tools
 | Tool | Description |
@@ -60,7 +60,8 @@ Or for a specific project (`.claude/settings.local.json` or `.mcp.json`):
 ### CRUD Tools
 | Tool | Description |
 |------|-------------|
-| `create_task` | Create new task |
+| `create_story` | Create new story to organize tasks under |
+| `create_task` | Create new task, optionally under a story |
 | `update_task` | Modify task details |
 | `archive_task` | Archive task (soft delete) |
 

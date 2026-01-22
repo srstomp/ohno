@@ -15,6 +15,7 @@ import type {
   ProjectStatus,
   SessionContext,
   CreateTaskOptions,
+  CreateStoryOptions,
   GetTasksOptions,
   TaskStatus,
   DependencyType,
@@ -25,6 +26,7 @@ import {
   generateTaskId,
   generateActivityId,
   generateDependencyId,
+  generateStoryId,
   getTimestamp,
   sortByPriority,
 } from "./utils.js";
@@ -520,6 +522,56 @@ export class TaskDatabase {
 
     this.save();
     return taskId;
+  }
+
+  /**
+   * Create a new story
+   */
+  createStory(opts: CreateStoryOptions): string {
+    const timestamp = getTimestamp();
+    let storyId = generateStoryId(opts.title, opts.epic_id ?? null, timestamp);
+
+    // Handle collision by appending counter
+    let counter = 0;
+    while (this.getStory(storyId) !== null) {
+      counter++;
+      storyId = generateStoryId(opts.title, opts.epic_id ?? null, `${timestamp}-${counter}`);
+    }
+
+    const sql = `
+      INSERT INTO stories (id, epic_id, title, description, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, 'todo', ?, ?)
+    `;
+
+    this.db.run(sql, [
+      storyId,
+      opts.epic_id ?? null,
+      opts.title,
+      opts.description ?? null,
+      timestamp,
+      timestamp,
+    ]);
+
+    this.save();
+    return storyId;
+  }
+
+  /**
+   * Get a single story by ID
+   */
+  getStory(storyId: string): { id: string; epic_id?: string; title: string; description?: string; status?: string; created_at?: string; updated_at?: string } | null {
+    const sql = "SELECT * FROM stories WHERE id = ?";
+    const stmt = this.db.prepare(sql);
+    stmt.bind([storyId]);
+
+    if (stmt.step()) {
+      const row = stmt.getAsObject() as { id: string; epic_id?: string; title: string; description?: string; status?: string; created_at?: string; updated_at?: string };
+      stmt.free();
+      return row;
+    }
+
+    stmt.free();
+    return null;
   }
 
   /**
