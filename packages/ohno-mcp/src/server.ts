@@ -36,6 +36,12 @@ const CreateTaskSchema = z.object({
   estimate_hours: z.number().optional(),
 });
 
+const CreateStorySchema = z.object({
+  title: z.string().min(1),
+  epic_id: z.string().optional(),
+  description: z.string().optional(),
+});
+
 const UpdateTaskSchema = z.object({
   task_id: z.string().min(1),
   title: z.string().optional(),
@@ -222,6 +228,19 @@ const TOOLS = [
     },
   },
   {
+    name: "create_story",
+    description: "Create a new story to organize tasks under",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        title: { type: "string", description: "Story title" },
+        epic_id: { type: "string", description: "Optional epic ID to associate with" },
+        description: { type: "string", description: "Story description" },
+      },
+      required: ["title"],
+    },
+  },
+  {
     name: "update_task",
     description: "Update task fields (title, description, task_type, estimate_hours)",
     inputSchema: {
@@ -304,6 +323,7 @@ export {
   TaskIdSchema,
   UpdateStatusSchema,
   CreateTaskSchema,
+  CreateStorySchema,
   UpdateTaskSchema,
   ActivitySchema,
   HandoffNotesSchema,
@@ -430,6 +450,12 @@ export async function handleTool(name: string, args: Record<string, unknown>): P
       const parsed = CreateTaskSchema.parse(args);
       const taskId = database.createTask(parsed);
       return { success: true, task_id: taskId };
+    }
+
+    case "create_story": {
+      const parsed = CreateStorySchema.parse(args);
+      const storyId = database.createStory(parsed);
+      return { success: true, story_id: storyId };
     }
 
     case "update_task": {

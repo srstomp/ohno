@@ -209,12 +209,29 @@ export const KANBAN_TEMPLATE = `<!DOCTYPE html>
         .card-meta { display: flex; justify-content: space-between; font-size: 0.7rem; color: var(--text-muted); }
         .card-type { background: var(--bg-secondary); padding: 0.1rem 0.3rem; border-radius: 3px; }
 
-        .card-epic {
+        .card-hierarchy {
             font-size: 0.65rem;
-            color: var(--blue);
-            margin-top: 0.375rem;
+            color: var(--text-secondary);
+            margin-top: 0.25rem;
+            display: flex;
+            align-items: center;
+            gap: 0.25rem;
+        }
+        .card-hierarchy:first-of-type {
             padding-top: 0.375rem;
             border-top: 1px solid var(--border);
+        }
+        .card-hierarchy-label {
+            color: var(--text-muted);
+            font-size: 0.6rem;
+        }
+        .card-completion {
+            background: var(--bg-secondary);
+            color: var(--text-muted);
+            padding: 0.1rem 0.3rem;
+            border-radius: 3px;
+            font-size: 0.6rem;
+            margin-left: auto;
         }
 
         .empty { text-align: center; padding: 2rem 1rem; color: var(--text-muted); font-size: 0.8rem; }
@@ -563,6 +580,23 @@ export const KANBAN_TEMPLATE = `<!DOCTYPE html>
             return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
         }
 
+        function getStoryCompletion(storyId) {
+            if (!storyId) return null;
+            const storyTasks = (data.tasks||[]).filter(t => t.story_id === storyId);
+            if (storyTasks.length === 0) return null;
+            const doneTasks = storyTasks.filter(t => t.status === 'done').length;
+            return { done: doneTasks, total: storyTasks.length };
+        }
+
+        function getEpicCompletion(epicId) {
+            if (!epicId) return null;
+            const epicStoryIds = new Set((data.stories||[]).filter(s => s.epic_id === epicId).map(s => s.id));
+            const epicTasks = (data.tasks||[]).filter(t => epicStoryIds.has(t.story_id));
+            if (epicTasks.length === 0) return null;
+            const doneTasks = epicTasks.filter(t => t.status === 'done').length;
+            return { done: doneTasks, total: epicTasks.length };
+        }
+
         function render() {
             const s = data.stats || {};
             const total = s.total_tasks || 1;
@@ -584,10 +618,15 @@ export const KANBAN_TEMPLATE = `<!DOCTYPE html>
             let filterHtml = '<div class="filter-group"><span class="filter-label">Epic</span><select class="filter-select" id="filterEpic"><option value="">All</option>';
             (data.epics||[]).forEach(e => { filterHtml += '<option value="' + esc(e.id) + '">' + esc(e.title) + '</option>'; });
             filterHtml += '</select></div><div class="filter-group"><span class="filter-label">Priority</span><select class="filter-select" id="filterPriority"><option value="">All</option><option value="P0">P0</option><option value="P1">P1</option><option value="P2">P2</option></select></div>';
+            filterHtml += '<div class="filter-group"><span class="filter-label">Type</span><select class="filter-select" id="filterType"><option value="">All</option><option value="feature">Feature</option><option value="bug">Bug</option><option value="chore">Chore</option><option value="spike">Spike</option><option value="test">Test</option></select></div>';
             filtersEl.innerHTML = filterHtml;
             app.appendChild(filtersEl);
+            document.getElementById('filterEpic').value = filters.epic;
+            document.getElementById('filterPriority').value = filters.priority;
+            document.getElementById('filterType').value = filters.type;
             document.getElementById('filterEpic').onchange = function() { setFilter('epic', this.value); };
             document.getElementById('filterPriority').onchange = function() { setFilter('priority', this.value); };
+            document.getElementById('filterType').onchange = function() { setFilter('type', this.value); };
 
             const board = document.createElement('div');
             board.className = 'board';
@@ -631,7 +670,20 @@ export const KANBAN_TEMPLATE = `<!DOCTYPE html>
             if (task.estimate_hours) metaRight += '<span>' + task.estimate_hours + 'h</span>';
             html += metaRight || '<span></span>';
             html += '</div>';
-            if (task.epic_title) html += '<div class="card-epic">' + esc(task.epic_title) + '</div>';
+            // Story with completion badge
+            if (task.story_id && task.story_title) {
+                const storyComp = getStoryCompletion(task.story_id);
+                html += '<div class="card-hierarchy"><span class="card-hierarchy-label">Story:</span> ' + esc(task.story_title);
+                if (storyComp) html += ' <span class="card-completion">' + storyComp.done + '/' + storyComp.total + '</span>';
+                html += '</div>';
+            }
+            // Epic with completion badge
+            if (task.epic_id && task.epic_title) {
+                const epicComp = getEpicCompletion(task.epic_id);
+                html += '<div class="card-hierarchy"><span class="card-hierarchy-label">Epic:</span> ' + esc(task.epic_title);
+                if (epicComp) html += ' <span class="card-completion">' + epicComp.done + '/' + epicComp.total + '</span>';
+                html += '</div>';
+            }
             html += '</div>';
             return html;
         }
@@ -643,6 +695,7 @@ export const KANBAN_TEMPLATE = `<!DOCTYPE html>
                 tasks = tasks.filter(t => storyIds.has(t.story_id));
             }
             if (filters.priority) tasks = tasks.filter(t => t.epic_priority === filters.priority);
+            if (filters.type) tasks = tasks.filter(t => t.task_type === filters.type);
             return tasks;
         }
 
