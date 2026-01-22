@@ -49,6 +49,16 @@ export function generateStoryId(title: string, epicId: string | null, timestamp:
 }
 
 /**
+ * Generate a content-based epic ID
+ * Format: epic-{sha256[:8]}
+ */
+export function generateEpicId(title: string, projectId: string | null, timestamp: string): string {
+  const content = `${title}|${projectId ?? ""}|${timestamp}`;
+  const hash = crypto.createHash("sha256").update(content).digest("hex");
+  return `epic-${hash.slice(0, 8)}`;
+}
+
+/**
  * Get current ISO timestamp
  */
 export function getTimestamp(): string {
