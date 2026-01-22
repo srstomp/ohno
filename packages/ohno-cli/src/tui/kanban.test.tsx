@@ -7,6 +7,9 @@ import { mkdtempSync, rmSync, mkdirSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { TaskDatabase } from "@stevestomp/ohno-core";
+import { render } from "ink-testing-library";
+import React from "react";
+import type { KanbanData } from "./kanban-data.js";
 
 describe("Kanban TUI", () => {
   let tempDir: string;
@@ -61,5 +64,41 @@ describe("Kanban TUI", () => {
       expect(data.blocked[0].blockers).toBe("Waiting for API");
       expect(data.review).toHaveLength(1);
     });
+  });
+});
+
+describe("KanbanBoard component", () => {
+  it("should render column headers", async () => {
+    const { KanbanBoard } = await import("./KanbanBoard.js");
+    const data: KanbanData = {
+      todo: [],
+      inProgress: [],
+      review: [],
+      done: [],
+      blocked: [],
+    };
+
+    const { lastFrame } = render(<KanbanBoard data={data} />);
+
+    expect(lastFrame()).toContain("Pending");
+    expect(lastFrame()).toContain("In Progress");
+    expect(lastFrame()).toContain("Done");
+  });
+
+  it("should render tasks in correct columns", async () => {
+    const { KanbanBoard } = await import("./KanbanBoard.js");
+    const data: KanbanData = {
+      todo: [{ id: "task-1", title: "Fix bug", status: "todo" }],
+      inProgress: [{ id: "task-2", title: "Add feature", status: "in_progress" }],
+      review: [],
+      done: [{ id: "task-3", title: "Setup", status: "done" }],
+      blocked: [],
+    };
+
+    const { lastFrame } = render(<KanbanBoard data={data} />);
+
+    expect(lastFrame()).toContain("Fix bug");
+    expect(lastFrame()).toContain("Add feature");
+    expect(lastFrame()).toContain("Setup");
   });
 });
