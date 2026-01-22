@@ -645,5 +645,14 @@ describe("CLI Commands", () => {
       expect(parsed.todo).toHaveLength(1);
       expect(parsed.inProgress).toHaveLength(1);
     });
+
+    it("should accept --watch flag", () => {
+      const program = createCli();
+      const kanbanCmd = program.commands.find((c) => c.name() === "kanban");
+      expect(kanbanCmd).toBeDefined();
+
+      const watchOption = kanbanCmd?.options.find((o) => o.long === "--watch");
+      expect(watchOption).toBeDefined();
+    });
   });
 });
