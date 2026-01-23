@@ -11,7 +11,7 @@ import {
   ensureOhnoDir,
   type TaskStatus,
 } from "@stevestomp/ohno-core";
-import { out, formatTask, formatStatus, formatPriority, colors } from "./output.js";
+import { out, formatTask, formatEpic, formatStory, formatStatus, formatPriority, colors } from "./output.js";
 import { startServer, syncKanban } from "./server.js";
 
 const require = createRequire(import.meta.url);
@@ -439,6 +439,290 @@ export function createCli(): Command {
           const blocked = blocking.includes(d.depends_on_task_id) ? colors.red(" (blocking)") : "";
           out.print(`  ${d.depends_on_task_id}  ${status}${blocked}`);
         });
+      }
+    });
+
+  // ==========================================================================
+  // Epic Commands
+  // ==========================================================================
+
+  program
+    .command("epics")
+    .description("List epics")
+    .option("-s, --status <status>", "Filter by status (todo, in_progress, review, done, blocked)")
+    .option("-p, --priority <priority>", "Filter by priority (P0, P1, P2, P3)")
+    .option("-l, --limit <limit>", "Max epics to return", "50")
+    .action(async (options, command) => {
+      const globalOpts = command.parent?.opts() ?? {};
+      const db = await getDb(globalOpts.dir);
+
+      const epics = db.getEpics({
+        status: options.status as TaskStatus,
+        priority: options.priority,
+        limit: parseInt(options.limit, 10),
+      });
+      db.close();
+
+      if (globalOpts.json) {
+        out.json({ epics });
+      } else {
+        if (epics.length === 0) {
+          out.print(colors.dim("No epics found"));
+          return;
+        }
+
+        epics.forEach((epic) => {
+          const status = formatStatus(epic.status ?? "todo");
+          const priority = epic.priority ? formatPriority(epic.priority) + " " : "";
+          out.print(`${colors.dim(epic.id)}  ${status}  ${priority}${epic.title}`);
+        });
+        out.print("");
+        out.print(colors.dim(`${epics.length} epics`));
+      }
+    });
+
+  const epic = program
+    .command("epic")
+    .description("Manage epics");
+
+  epic
+    .command("get <id>")
+    .description("Get epic details")
+    .action(async (id, options, command) => {
+      const globalOpts = command.parent?.parent?.opts() ?? {};
+      const db = await getDb(globalOpts.dir);
+      const epicData = db.getEpic(id);
+      db.close();
+
+      if (!epicData) {
+        out.error("Epic not found", id);
+        process.exit(1);
+      }
+
+      if (globalOpts.json) {
+        out.json(epicData);
+      } else {
+        out.print(formatEpic(epicData as unknown as Record<string, unknown>));
+      }
+    });
+
+  epic
+    .command("create <title>")
+    .description("Create a new epic")
+    .option("-p, --priority <priority>", "Priority (P0, P1, P2, P3)", "P2")
+    .option("--description <desc>", "Epic description")
+    .action(async (title, options, command) => {
+      const globalOpts = command.parent?.parent?.opts() ?? {};
+      const db = await getDb(globalOpts.dir);
+
+      const epicId = db.createEpic({
+        title,
+        priority: options.priority,
+        description: options.description,
+      });
+      db.close();
+
+      if (globalOpts.json) {
+        out.json({ success: true, epic_id: epicId });
+      } else {
+        out.success(`Created epic ${epicId}`);
+      }
+    });
+
+  epic
+    .command("update <id>")
+    .description("Update an epic")
+    .option("--title <title>", "New title")
+    .option("--description <desc>", "New description")
+    .option("-p, --priority <priority>", "New priority (P0, P1, P2, P3)")
+    .option("-s, --status <status>", "New status (todo, in_progress, review, done, blocked)")
+    .action(async (id, options, command) => {
+      const globalOpts = command.parent?.parent?.opts() ?? {};
+      const db = await getDb(globalOpts.dir);
+
+      const updates: Record<string, unknown> = {};
+      if (options.title) updates.title = options.title;
+      if (options.description) updates.description = options.description;
+      if (options.priority) updates.priority = options.priority;
+      if (options.status) updates.status = options.status;
+
+      if (Object.keys(updates).length === 0) {
+        out.error("No updates provided", "Use --title, --description, --priority, or --status");
+        process.exit(1);
+      }
+
+      const success = db.updateEpic(id, updates);
+      db.close();
+
+      if (globalOpts.json) {
+        out.json({ success });
+      } else if (success) {
+        out.success(`Updated epic ${id}`);
+      } else {
+        out.error("Failed to update epic", id);
+        process.exit(1);
+      }
+    });
+
+  epic
+    .command("delete <id>")
+    .description("Delete an epic (also deletes all stories and tasks)")
+    .action(async (id, options, command) => {
+      const globalOpts = command.parent?.parent?.opts() ?? {};
+      const db = await getDb(globalOpts.dir);
+
+      const success = db.deleteEpic(id);
+      db.close();
+
+      if (globalOpts.json) {
+        out.json({ success });
+      } else if (success) {
+        out.success(`Deleted epic ${id}`);
+      } else {
+        out.error("Failed to delete epic", id);
+        process.exit(1);
+      }
+    });
+
+  // ==========================================================================
+  // Story Commands
+  // ==========================================================================
+
+  program
+    .command("stories")
+    .description("List stories")
+    .option("-e, --epic <epic-id>", "Filter by epic ID")
+    .option("-s, --status <status>", "Filter by status (todo, in_progress, done)")
+    .option("-l, --limit <limit>", "Max stories to return", "50")
+    .action(async (options, command) => {
+      const globalOpts = command.parent?.opts() ?? {};
+      const db = await getDb(globalOpts.dir);
+
+      const stories = db.getStories({
+        epic_id: options.epic,
+        status: options.status,
+        limit: parseInt(options.limit, 10),
+      });
+      db.close();
+
+      if (globalOpts.json) {
+        out.json({ stories });
+      } else {
+        if (stories.length === 0) {
+          out.print(colors.dim("No stories found"));
+          return;
+        }
+
+        stories.forEach((story) => {
+          const status = formatStatus(story.status);
+          const epicInfo = story.epic_id ? colors.dim(` [${story.epic_id}]`) : "";
+          out.print(`${colors.dim(story.id)}  ${status}  ${story.title}${epicInfo}`);
+        });
+        out.print("");
+        out.print(colors.dim(`${stories.length} stories`));
+      }
+    });
+
+  const story = program
+    .command("story")
+    .description("Manage stories");
+
+  story
+    .command("get <id>")
+    .description("Get story details")
+    .action(async (id, options, command) => {
+      const globalOpts = command.parent?.parent?.opts() ?? {};
+      const db = await getDb(globalOpts.dir);
+      const storyData = db.getStory(id);
+      db.close();
+
+      if (!storyData) {
+        out.error("Story not found", id);
+        process.exit(1);
+      }
+
+      if (globalOpts.json) {
+        out.json(storyData);
+      } else {
+        out.print(formatStory(storyData as unknown as Record<string, unknown>));
+      }
+    });
+
+  story
+    .command("create <title>")
+    .description("Create a new story")
+    .option("-e, --epic <epic-id>", "Parent epic ID")
+    .option("--description <desc>", "Story description")
+    .action(async (title, options, command) => {
+      const globalOpts = command.parent?.parent?.opts() ?? {};
+      const db = await getDb(globalOpts.dir);
+
+      const storyId = db.createStory({
+        title,
+        epic_id: options.epic,
+        description: options.description,
+      });
+      db.close();
+
+      if (globalOpts.json) {
+        out.json({ success: true, story_id: storyId });
+      } else {
+        out.success(`Created story ${storyId}`);
+      }
+    });
+
+  story
+    .command("update <id>")
+    .description("Update a story")
+    .option("--title <title>", "New title")
+    .option("--description <desc>", "New description")
+    .option("-s, --status <status>", "New status (todo, in_progress, done)")
+    .option("-e, --epic <epic-id>", "New parent epic ID")
+    .action(async (id, options, command) => {
+      const globalOpts = command.parent?.parent?.opts() ?? {};
+      const db = await getDb(globalOpts.dir);
+
+      const updates: Record<string, unknown> = {};
+      if (options.title) updates.title = options.title;
+      if (options.description) updates.description = options.description;
+      if (options.status) updates.status = options.status;
+      if (options.epic) updates.epic_id = options.epic;
+
+      if (Object.keys(updates).length === 0) {
+        out.error("No updates provided", "Use --title, --description, --status, or --epic");
+        process.exit(1);
+      }
+
+      const success = db.updateStory(id, updates);
+      db.close();
+
+      if (globalOpts.json) {
+        out.json({ success });
+      } else if (success) {
+        out.success(`Updated story ${id}`);
+      } else {
+        out.error("Failed to update story", id);
+        process.exit(1);
+      }
+    });
+
+  story
+    .command("delete <id>")
+    .description("Delete a story (also deletes all tasks)")
+    .action(async (id, options, command) => {
+      const globalOpts = command.parent?.parent?.opts() ?? {};
+      const db = await getDb(globalOpts.dir);
+
+      const success = db.deleteStory(id);
+      db.close();
+
+      if (globalOpts.json) {
+        out.json({ success });
+      } else if (success) {
+        out.success(`Deleted story ${id}`);
+      } else {
+        out.error("Failed to delete story", id);
+        process.exit(1);
       }
     });
 

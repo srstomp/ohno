@@ -184,6 +184,51 @@ export function formatPriority(priority: string): string {
 }
 
 /**
+ * Format an epic for display
+ */
+export function formatEpic(epic: Record<string, unknown>): string {
+  const lines: string[] = [];
+
+  const id = colors.dim(String(epic.id ?? ""));
+  const title = colors.bold(String(epic.title ?? ""));
+  const status = formatStatus(String(epic.status ?? "todo"));
+  const priority = epic.priority ? formatPriority(String(epic.priority)) : "";
+
+  lines.push(`${id} ${title}`);
+  lines.push(`  Status: ${status}`);
+  if (priority) {
+    lines.push(`  Priority: ${priority}`);
+  }
+  if (epic.description) {
+    lines.push(`  Description: ${epic.description}`);
+  }
+
+  return lines.join("\n");
+}
+
+/**
+ * Format a story for display
+ */
+export function formatStory(story: Record<string, unknown>): string {
+  const lines: string[] = [];
+
+  const id = colors.dim(String(story.id ?? ""));
+  const title = colors.bold(String(story.title ?? ""));
+  const status = formatStatus(String(story.status ?? "todo"));
+
+  lines.push(`${id} ${title}`);
+  lines.push(`  Status: ${status}`);
+  if (story.epic_id) {
+    lines.push(`  Epic: ${colors.dim(String(story.epic_id))}`);
+  }
+  if (story.description) {
+    lines.push(`  Description: ${story.description}`);
+  }
+
+  return lines.join("\n");
+}
+
+/**
  * Format a table row
  */
 export function formatTableRow(columns: string[], widths: number[]): string {
