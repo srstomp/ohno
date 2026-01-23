@@ -1026,6 +1026,74 @@ export class TaskDatabase {
     return changes > 0;
   }
 
+  /**
+   * Delete an epic (hard delete)
+   * Also deletes all stories and tasks associated with the epic
+   */
+  deleteEpic(epicId: string): boolean {
+    const epic = this.getEpic(epicId);
+    if (!epic) {
+      return false;
+    }
+
+    // Get all stories in this epic
+    const stories = this.getStories({ epic_id: epicId });
+
+    // Delete all tasks in each story
+    for (const story of stories) {
+      const tasks = this.getTasks({ limit: 1000 });
+      for (const task of tasks) {
+        if (task.story_id === story.id) {
+          this.deleteTask(task.id);
+        }
+      }
+    }
+
+    // Delete all stories in this epic
+    for (const story of stories) {
+      this.db.run("DELETE FROM stories WHERE id = ?", [story.id]);
+    }
+
+    // Delete the epic
+    this.db.run("DELETE FROM epics WHERE id = ?", [epicId]);
+    const changes = this.db.getRowsModified();
+
+    if (changes > 0) {
+      this.save();
+    }
+
+    return changes > 0;
+  }
+
+  /**
+   * Delete a story (hard delete)
+   * Also deletes all tasks associated with the story
+   */
+  deleteStory(storyId: string): boolean {
+    const story = this.getStory(storyId);
+    if (!story) {
+      return false;
+    }
+
+    // Delete all tasks in this story
+    const tasks = this.getTasks({ limit: 1000 });
+    for (const task of tasks) {
+      if (task.story_id === storyId) {
+        this.deleteTask(task.id);
+      }
+    }
+
+    // Delete the story
+    this.db.run("DELETE FROM stories WHERE id = ?", [storyId]);
+    const changes = this.db.getRowsModified();
+
+    if (changes > 0) {
+      this.save();
+    }
+
+    return changes > 0;
+  }
+
   // ==========================================================================
   // Dependency Methods
   // ==========================================================================
