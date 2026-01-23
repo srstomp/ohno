@@ -128,6 +128,16 @@ export interface CreateStoryOptions {
 }
 
 /**
+ * Options for updating an existing story
+ */
+export interface UpdateStoryOptions {
+  title?: string;
+  description?: string | null;
+  status?: StoryStatus;
+  epic_id?: string | null;
+}
+
+/**
  * Story status enum
  */
 export type StoryStatus = "todo" | "in_progress" | "done";
