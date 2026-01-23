@@ -117,6 +117,14 @@ const GetStoriesSchema = z.object({
   offset: z.number().min(0).default(0),
 });
 
+const UpdateStorySchema = z.object({
+  story_id: z.string().min(1),
+  title: z.string().optional(),
+  description: z.string().nullable().optional(),
+  status: z.enum(["todo", "in_progress", "done"]).optional(),
+  epic_id: z.string().nullable().optional(),
+});
+
 const UpdateEpicSchema = z.object({
   epic_id: z.string().min(1),
   title: z.string().optional(),
@@ -310,6 +318,21 @@ const TOOLS = [
     },
   },
   {
+    name: "update_story",
+    description: "Update story fields (title, description, status, epic_id)",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        story_id: { type: "string", description: "Story ID" },
+        title: { type: "string", description: "New title" },
+        description: { type: ["string", "null"], description: "New description (null to clear)" },
+        status: { type: "string", enum: ["todo", "in_progress", "done"], description: "New status" },
+        epic_id: { type: ["string", "null"], description: "New epic ID (null to unassign)" },
+      },
+      required: ["story_id"],
+    },
+  },
+  {
     name: "create_epic",
     description: "Create a new epic to organize stories under",
     inputSchema: {
@@ -458,6 +481,7 @@ export {
   CreateStorySchema,
   StoryIdSchema,
   GetStoriesSchema,
+  UpdateStorySchema,
   CreateEpicSchema,
   EpicIdSchema,
   UpdateEpicSchema,
@@ -609,6 +633,13 @@ export async function handleTool(name: string, args: Record<string, unknown>): P
     case "list_stories": {
       const parsed = GetStoriesSchema.parse(args);
       return { stories: database.getStories(parsed) };
+    }
+
+    case "update_story": {
+      const parsed = UpdateStorySchema.parse(args);
+      const { story_id, ...updates } = parsed;
+      const success = database.updateStory(story_id, updates);
+      return { success };
     }
 
     case "create_epic": {

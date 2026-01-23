@@ -28,6 +28,7 @@ import {
   RemoveDependencySchema,
   SummarizeSchema,
   GetStoriesSchema,
+  UpdateStorySchema,
 } from "./server.js";
 
 describe("MCP Server", () => {
@@ -49,8 +50,8 @@ describe("MCP Server", () => {
   });
 
   describe("Tool Definitions", () => {
-    it("should have 27 tools defined", () => {
-      expect(TOOLS.length).toBe(27);
+    it("should have 28 tools defined", () => {
+      expect(TOOLS.length).toBe(28);
     });
 
     it("should have unique tool names", () => {
@@ -386,6 +387,110 @@ describe("MCP Server", () => {
         expect(result.offset).toBe(5);
       });
     });
+
+    describe("UpdateStorySchema", () => {
+      it("should accept story_id only", () => {
+        const result = UpdateStorySchema.parse({ story_id: "story-123" });
+        expect(result.story_id).toBe("story-123");
+      });
+
+      it("should reject empty story_id", () => {
+        expect(() => UpdateStorySchema.parse({ story_id: "" })).toThrow(ZodError);
+      });
+
+      it("should reject missing story_id", () => {
+        expect(() => UpdateStorySchema.parse({})).toThrow(ZodError);
+      });
+
+      it("should accept optional title", () => {
+        const result = UpdateStorySchema.parse({
+          story_id: "story-123",
+          title: "New title",
+        });
+        expect(result.title).toBe("New title");
+      });
+
+      it("should accept optional description", () => {
+        const result = UpdateStorySchema.parse({
+          story_id: "story-123",
+          description: "New description",
+        });
+        expect(result.description).toBe("New description");
+      });
+
+      it("should accept null description (to clear)", () => {
+        const result = UpdateStorySchema.parse({
+          story_id: "story-123",
+          description: null,
+        });
+        expect(result.description).toBeNull();
+      });
+
+      it("should accept valid status", () => {
+        const result = UpdateStorySchema.parse({
+          story_id: "story-123",
+          status: "in_progress",
+        });
+        expect(result.status).toBe("in_progress");
+      });
+
+      it("should accept all valid story statuses", () => {
+        const validStatuses = ["todo", "in_progress", "done"];
+        for (const status of validStatuses) {
+          const result = UpdateStorySchema.parse({
+            story_id: "story-123",
+            status,
+          });
+          expect(result.status).toBe(status);
+        }
+      });
+
+      it("should reject invalid status", () => {
+        expect(() =>
+          UpdateStorySchema.parse({
+            story_id: "story-123",
+            status: "review",
+          })
+        ).toThrow(ZodError);
+        expect(() =>
+          UpdateStorySchema.parse({
+            story_id: "story-123",
+            status: "blocked",
+          })
+        ).toThrow(ZodError);
+      });
+
+      it("should accept optional epic_id", () => {
+        const result = UpdateStorySchema.parse({
+          story_id: "story-123",
+          epic_id: "epic-456",
+        });
+        expect(result.epic_id).toBe("epic-456");
+      });
+
+      it("should accept null epic_id (to unassign)", () => {
+        const result = UpdateStorySchema.parse({
+          story_id: "story-123",
+          epic_id: null,
+        });
+        expect(result.epic_id).toBeNull();
+      });
+
+      it("should accept all fields together", () => {
+        const result = UpdateStorySchema.parse({
+          story_id: "story-123",
+          title: "Updated title",
+          description: "Updated description",
+          status: "done",
+          epic_id: "epic-789",
+        });
+        expect(result.story_id).toBe("story-123");
+        expect(result.title).toBe("Updated title");
+        expect(result.description).toBe("Updated description");
+        expect(result.status).toBe("done");
+        expect(result.epic_id).toBe("epic-789");
+      });
+    });
   });
 
   describe("Tool Handlers", () => {
@@ -642,6 +747,124 @@ describe("MCP Server", () => {
         for (const story of result.stories) {
           expect(story.status).toBe("in_progress");
         }
+      });
+    });
+
+    describe("update_story", () => {
+      it("should update story title", async () => {
+        const storyId = db.createStory({ title: "Original title" });
+        const result = await handleTool("update_story", {
+          story_id: storyId,
+          title: "Updated title",
+        }) as { success: boolean };
+
+        expect(result.success).toBe(true);
+        const story = db.getStory(storyId);
+        expect(story?.title).toBe("Updated title");
+      });
+
+      it("should update story description", async () => {
+        const storyId = db.createStory({ title: "Test story" });
+        const result = await handleTool("update_story", {
+          story_id: storyId,
+          description: "New description",
+        }) as { success: boolean };
+
+        expect(result.success).toBe(true);
+        const story = db.getStory(storyId);
+        expect(story?.description).toBe("New description");
+      });
+
+      it("should clear story description with null", async () => {
+        const storyId = db.createStory({
+          title: "Test story",
+          description: "Initial description",
+        });
+        const result = await handleTool("update_story", {
+          story_id: storyId,
+          description: null,
+        }) as { success: boolean };
+
+        expect(result.success).toBe(true);
+        const story = db.getStory(storyId);
+        expect(story?.description).toBeNull();
+      });
+
+      it("should update story status", async () => {
+        const storyId = db.createStory({ title: "Test story" });
+        const result = await handleTool("update_story", {
+          story_id: storyId,
+          status: "in_progress",
+        }) as { success: boolean };
+
+        expect(result.success).toBe(true);
+        const story = db.getStory(storyId);
+        expect(story?.status).toBe("in_progress");
+      });
+
+      it("should update story epic_id", async () => {
+        const dbInstance = db as unknown as { db: { run: (sql: string, params?: unknown[]) => void } };
+        dbInstance.db.run(
+          "INSERT INTO epics (id, title, priority) VALUES (?, ?, ?)",
+          ["epic-1", "Epic 1", "P0"]
+        );
+
+        const storyId = db.createStory({ title: "Test story" });
+        const result = await handleTool("update_story", {
+          story_id: storyId,
+          epic_id: "epic-1",
+        }) as { success: boolean };
+
+        expect(result.success).toBe(true);
+        const story = db.getStory(storyId);
+        expect(story?.epic_id).toBe("epic-1");
+      });
+
+      it("should unassign story from epic with null", async () => {
+        const dbInstance = db as unknown as { db: { run: (sql: string, params?: unknown[]) => void } };
+        dbInstance.db.run(
+          "INSERT INTO epics (id, title, priority) VALUES (?, ?, ?)",
+          ["epic-1", "Epic 1", "P0"]
+        );
+
+        const storyId = db.createStory({ title: "Test story", epic_id: "epic-1" });
+        const result = await handleTool("update_story", {
+          story_id: storyId,
+          epic_id: null,
+        }) as { success: boolean };
+
+        expect(result.success).toBe(true);
+        const story = db.getStory(storyId);
+        expect(story?.epic_id).toBeNull();
+      });
+
+      it("should update multiple fields at once", async () => {
+        const storyId = db.createStory({
+          title: "Original",
+          description: "Old description",
+        });
+
+        const result = await handleTool("update_story", {
+          story_id: storyId,
+          title: "Updated title",
+          description: "Updated description",
+          status: "done",
+        }) as { success: boolean };
+
+        expect(result.success).toBe(true);
+        const story = db.getStory(storyId);
+        expect(story?.title).toBe("Updated title");
+        expect(story?.description).toBe("Updated description");
+        expect(story?.status).toBe("done");
+      });
+
+      it("should return success false for non-existent story", async () => {
+        const result = await handleTool("update_story", {
+          story_id: "non-existent",
+          title: "New title",
+        }) as { success: boolean };
+
+        expect(result.success).toBe(false);
       });
     });
 
