@@ -106,6 +106,10 @@ const EpicIdSchema = z.object({
   epic_id: z.string().min(1),
 });
 
+const StoryIdSchema = z.object({
+  story_id: z.string().min(1),
+});
+
 const UpdateEpicSchema = z.object({
   epic_id: z.string().min(1),
   title: z.string().optional(),
@@ -275,6 +279,17 @@ const TOOLS = [
     },
   },
   {
+    name: "get_story",
+    description: "Get full details for a specific story by ID",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        story_id: { type: "string", description: "Story ID" },
+      },
+      required: ["story_id"],
+    },
+  },
+  {
     name: "create_epic",
     description: "Create a new epic to organize stories under",
     inputSchema: {
@@ -421,6 +436,7 @@ export {
   UpdateStatusSchema,
   CreateTaskSchema,
   CreateStorySchema,
+  StoryIdSchema,
   CreateEpicSchema,
   EpicIdSchema,
   UpdateEpicSchema,
@@ -558,6 +574,15 @@ export async function handleTool(name: string, args: Record<string, unknown>): P
       const parsed = CreateStorySchema.parse(args);
       const storyId = database.createStory(parsed);
       return { success: true, story_id: storyId };
+    }
+
+    case "get_story": {
+      const parsed = StoryIdSchema.parse(args);
+      const story = database.getStory(parsed.story_id);
+      if (!story) {
+        return { error: `Story not found: ${parsed.story_id}` };
+      }
+      return story;
     }
 
     case "create_epic": {
