@@ -556,7 +556,7 @@ export const KANBAN_TEMPLATE = `<!DOCTYPE html>
 
         let data = window.KANBAN_DATA || {};
         let lastSync = data.synced_at;
-        let filters = { epic: '', priority: '', type: '' };
+        let filters = { epic: '', priority: '', type: '', story: '' };
         let currentTaskId = null;
 
         function init() {
@@ -617,14 +617,18 @@ export const KANBAN_TEMPLATE = `<!DOCTYPE html>
             filtersEl.className = 'filters';
             let filterHtml = '<div class="filter-group"><span class="filter-label">Epic</span><select class="filter-select" id="filterEpic"><option value="">All</option>';
             (data.epics||[]).forEach(e => { filterHtml += '<option value="' + esc(e.id) + '">' + esc(e.title) + '</option>'; });
+            filterHtml += '</select></div><div class="filter-group"><span class="filter-label">Story</span><select class="filter-select" id="filterStory"><option value="">All</option>';
+            (data.stories||[]).forEach(s => { filterHtml += '<option value="' + esc(s.id) + '">' + esc(s.title) + '</option>'; });
             filterHtml += '</select></div><div class="filter-group"><span class="filter-label">Priority</span><select class="filter-select" id="filterPriority"><option value="">All</option><option value="P0">P0</option><option value="P1">P1</option><option value="P2">P2</option></select></div>';
             filterHtml += '<div class="filter-group"><span class="filter-label">Type</span><select class="filter-select" id="filterType"><option value="">All</option><option value="feature">Feature</option><option value="bug">Bug</option><option value="chore">Chore</option><option value="spike">Spike</option><option value="test">Test</option></select></div>';
             filtersEl.innerHTML = filterHtml;
             app.appendChild(filtersEl);
             document.getElementById('filterEpic').value = filters.epic;
+            document.getElementById('filterStory').value = filters.story;
             document.getElementById('filterPriority').value = filters.priority;
             document.getElementById('filterType').value = filters.type;
             document.getElementById('filterEpic').onchange = function() { setFilter('epic', this.value); };
+            document.getElementById('filterStory').onchange = function() { setFilter('story', this.value); };
             document.getElementById('filterPriority').onchange = function() { setFilter('priority', this.value); };
             document.getElementById('filterType').onchange = function() { setFilter('type', this.value); };
 
@@ -694,6 +698,7 @@ export const KANBAN_TEMPLATE = `<!DOCTYPE html>
                 const storyIds = new Set((data.stories||[]).filter(s => s.epic_id === filters.epic).map(s => s.id));
                 tasks = tasks.filter(t => storyIds.has(t.story_id));
             }
+            if (filters.story) tasks = tasks.filter(t => t.story_id === filters.story);
             if (filters.priority) tasks = tasks.filter(t => t.epic_priority === filters.priority);
             if (filters.type) tasks = tasks.filter(t => t.task_type === filters.type);
             return tasks;
