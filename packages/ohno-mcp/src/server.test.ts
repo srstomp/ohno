@@ -29,6 +29,10 @@ import {
   SummarizeSchema,
   GetStoriesSchema,
   UpdateStorySchema,
+  CreateEpicSchema,
+  EpicIdSchema,
+  UpdateEpicSchema,
+  GetEpicsSchema,
 } from "./server.js";
 
 describe("MCP Server", () => {
@@ -491,6 +495,172 @@ describe("MCP Server", () => {
         expect(result.epic_id).toBe("epic-789");
       });
     });
+
+    describe("CreateEpicSchema", () => {
+      it("should accept minimal epic", () => {
+        const result = CreateEpicSchema.parse({ title: "New epic" });
+        expect(result.title).toBe("New epic");
+      });
+
+      it("should reject empty title", () => {
+        expect(() => CreateEpicSchema.parse({ title: "" })).toThrow(ZodError);
+      });
+
+      it("should reject missing title", () => {
+        expect(() => CreateEpicSchema.parse({})).toThrow(ZodError);
+      });
+
+      it("should accept all optional fields", () => {
+        const result = CreateEpicSchema.parse({
+          title: "Full epic",
+          project_id: "project-1",
+          description: "Epic description",
+          priority: "P0",
+        });
+        expect(result.project_id).toBe("project-1");
+        expect(result.description).toBe("Epic description");
+        expect(result.priority).toBe("P0");
+      });
+
+      it("should accept all valid priorities", () => {
+        const validPriorities = ["P0", "P1", "P2", "P3"];
+        for (const priority of validPriorities) {
+          const result = CreateEpicSchema.parse({
+            title: "Epic",
+            priority,
+          });
+          expect(result.priority).toBe(priority);
+        }
+      });
+
+      it("should reject invalid priority", () => {
+        expect(() =>
+          CreateEpicSchema.parse({ title: "Epic", priority: "P4" })
+        ).toThrow(ZodError);
+        expect(() =>
+          CreateEpicSchema.parse({ title: "Epic", priority: "invalid" })
+        ).toThrow(ZodError);
+      });
+    });
+
+    describe("EpicIdSchema", () => {
+      it("should accept valid epic_id", () => {
+        const result = EpicIdSchema.parse({ epic_id: "epic-abc123" });
+        expect(result.epic_id).toBe("epic-abc123");
+      });
+
+      it("should reject empty epic_id", () => {
+        expect(() => EpicIdSchema.parse({ epic_id: "" })).toThrow(ZodError);
+      });
+
+      it("should reject missing epic_id", () => {
+        expect(() => EpicIdSchema.parse({})).toThrow(ZodError);
+      });
+    });
+
+    describe("UpdateEpicSchema", () => {
+      it("should accept epic_id only", () => {
+        const result = UpdateEpicSchema.parse({ epic_id: "epic-123" });
+        expect(result.epic_id).toBe("epic-123");
+      });
+
+      it("should reject empty epic_id", () => {
+        expect(() => UpdateEpicSchema.parse({ epic_id: "" })).toThrow(ZodError);
+      });
+
+      it("should reject missing epic_id", () => {
+        expect(() => UpdateEpicSchema.parse({})).toThrow(ZodError);
+      });
+
+      it("should accept optional title", () => {
+        const result = UpdateEpicSchema.parse({
+          epic_id: "epic-123",
+          title: "Updated epic",
+        });
+        expect(result.title).toBe("Updated epic");
+      });
+
+      it("should accept optional description", () => {
+        const result = UpdateEpicSchema.parse({
+          epic_id: "epic-123",
+          description: "New description",
+        });
+        expect(result.description).toBe("New description");
+      });
+
+      it("should accept valid priority", () => {
+        const result = UpdateEpicSchema.parse({
+          epic_id: "epic-123",
+          priority: "P1",
+        });
+        expect(result.priority).toBe("P1");
+      });
+
+      it("should accept valid status", () => {
+        const result = UpdateEpicSchema.parse({
+          epic_id: "epic-123",
+          status: "in_progress",
+        });
+        expect(result.status).toBe("in_progress");
+      });
+
+      it("should accept all valid statuses", () => {
+        const validStatuses = ["todo", "in_progress", "review", "done", "blocked"];
+        for (const status of validStatuses) {
+          const result = UpdateEpicSchema.parse({
+            epic_id: "epic-123",
+            status,
+          });
+          expect(result.status).toBe(status);
+        }
+      });
+
+      it("should accept all fields together", () => {
+        const result = UpdateEpicSchema.parse({
+          epic_id: "epic-123",
+          title: "Updated epic",
+          description: "Updated description",
+          priority: "P2",
+          status: "review",
+        });
+        expect(result.epic_id).toBe("epic-123");
+        expect(result.title).toBe("Updated epic");
+        expect(result.description).toBe("Updated description");
+        expect(result.priority).toBe("P2");
+        expect(result.status).toBe("review");
+      });
+    });
+
+    describe("GetEpicsSchema", () => {
+      it("should accept empty object with defaults", () => {
+        const result = GetEpicsSchema.parse({});
+        expect(result.limit).toBe(50);
+      });
+
+      it("should accept status filter", () => {
+        const result = GetEpicsSchema.parse({ status: "in_progress" });
+        expect(result.status).toBe("in_progress");
+      });
+
+      it("should accept priority filter", () => {
+        const result = GetEpicsSchema.parse({ priority: "P0" });
+        expect(result.priority).toBe("P0");
+      });
+
+      it("should accept limit", () => {
+        const result = GetEpicsSchema.parse({ limit: 25 });
+        expect(result.limit).toBe(25);
+      });
+
+      it("should validate limit bounds", () => {
+        expect(() => GetEpicsSchema.parse({ limit: 0 })).toThrow(ZodError);
+        expect(() => GetEpicsSchema.parse({ limit: 101 })).toThrow(ZodError);
+        const result = GetEpicsSchema.parse({ limit: 1 });
+        expect(result.limit).toBe(1);
+        const result2 = GetEpicsSchema.parse({ limit: 100 });
+        expect(result2.limit).toBe(100);
+      });
+    });
   });
 
   describe("Tool Handlers", () => {
@@ -861,6 +1031,153 @@ describe("MCP Server", () => {
       it("should return success false for non-existent story", async () => {
         const result = await handleTool("update_story", {
           story_id: "non-existent",
+          title: "New title",
+        }) as { success: boolean };
+
+        expect(result.success).toBe(false);
+      });
+    });
+
+    describe("create_epic", () => {
+      it("should create epic and return ID", async () => {
+        const result = await handleTool("create_epic", { title: "New epic" }) as {
+          success: boolean;
+          epic_id: string;
+        };
+        expect(result.success).toBe(true);
+        expect(result.epic_id).toMatch(/^epic-[a-f0-9]{8}$/);
+      });
+
+      it("should create epic with all options", async () => {
+        const result = await handleTool("create_epic", {
+          title: "Full epic",
+          project_id: "project-1",
+          description: "Epic description",
+          priority: "P0",
+        }) as { success: boolean; epic_id: string };
+
+        expect(result.success).toBe(true);
+        expect(result.epic_id).toMatch(/^epic-[a-f0-9]{8}$/);
+      });
+    });
+
+    describe("get_epic", () => {
+      it("should return epic by ID", async () => {
+        const epicId = db.createEpic({ title: "Test epic" });
+        const result = await handleTool("get_epic", { epic_id: epicId }) as { title: string };
+        expect(result.title).toBe("Test epic");
+      });
+
+      it("should return error for non-existent epic", async () => {
+        const result = await handleTool("get_epic", { epic_id: "non-existent" }) as { error: string };
+        expect(result.error).toContain("Epic not found");
+      });
+    });
+
+    describe("get_epics", () => {
+      it("should return empty list initially", async () => {
+        const result = await handleTool("get_epics", {}) as { epics: unknown[] };
+        expect(result.epics).toEqual([]);
+      });
+
+      it("should return created epics", async () => {
+        db.createEpic({ title: "Epic 1" });
+        db.createEpic({ title: "Epic 2" });
+        const result = await handleTool("get_epics", {}) as { epics: unknown[] };
+        expect(result.epics.length).toBe(2);
+      });
+
+      it("should filter by status", async () => {
+        const epic1 = db.createEpic({ title: "Todo epic" });
+        const epic2 = db.createEpic({ title: "In progress epic" });
+        const epic3 = db.createEpic({ title: "Done epic" });
+
+        db.updateEpic(epic2, { status: "in_progress" });
+        db.updateEpic(epic3, { status: "done" });
+
+        const result = await handleTool("get_epics", { status: "in_progress" }) as {
+          epics: Array<{ title: string; status: string }>;
+        };
+        expect(result.epics.length).toBe(1);
+        expect(result.epics[0].title).toBe("In progress epic");
+        expect(result.epics[0].status).toBe("in_progress");
+      });
+
+      it("should filter by priority", async () => {
+        db.createEpic({ title: "P0 epic", priority: "P0" });
+        db.createEpic({ title: "P1 epic", priority: "P1" });
+        db.createEpic({ title: "P2 epic", priority: "P2" });
+
+        const result = await handleTool("get_epics", { priority: "P0" }) as {
+          epics: Array<{ title: string; priority: string }>;
+        };
+        expect(result.epics.length).toBe(1);
+        expect(result.epics[0].title).toBe("P0 epic");
+        expect(result.epics[0].priority).toBe("P0");
+      });
+
+      it("should respect limit parameter", async () => {
+        for (let i = 0; i < 10; i++) {
+          db.createEpic({ title: `Epic ${i}` });
+        }
+
+        const result = await handleTool("get_epics", { limit: 5 }) as { epics: unknown[] };
+        expect(result.epics.length).toBe(5);
+      });
+    });
+
+    describe("update_epic", () => {
+      it("should update epic title", async () => {
+        const epicId = db.createEpic({ title: "Original title" });
+        const result = await handleTool("update_epic", {
+          epic_id: epicId,
+          title: "Updated title",
+        }) as { success: boolean };
+
+        expect(result.success).toBe(true);
+        const epic = db.getEpic(epicId);
+        expect(epic?.title).toBe("Updated title");
+      });
+
+      it("should update epic description", async () => {
+        const epicId = db.createEpic({ title: "Test epic" });
+        const result = await handleTool("update_epic", {
+          epic_id: epicId,
+          description: "New description",
+        }) as { success: boolean };
+
+        expect(result.success).toBe(true);
+        const epic = db.getEpic(epicId);
+        expect(epic?.description).toBe("New description");
+      });
+
+      it("should update epic priority", async () => {
+        const epicId = db.createEpic({ title: "Test epic", priority: "P0" });
+        const result = await handleTool("update_epic", {
+          epic_id: epicId,
+          priority: "P2",
+        }) as { success: boolean };
+
+        expect(result.success).toBe(true);
+        const epic = db.getEpic(epicId);
+        expect(epic?.priority).toBe("P2");
+      });
+
+      it("should update epic status", async () => {
+        const epicId = db.createEpic({ title: "Test epic" });
+        const result = await handleTool("update_epic", {
+          epic_id: epicId,
+          status: "in_progress",
+        }) as { success: boolean };
+
+        expect(result.success).toBe(true);
+        const epic = db.getEpic(epicId);
+        expect(epic?.status).toBe("in_progress");
+      });
+
+      it("should return success false for non-existent epic", async () => {
+        const result = await handleTool("update_epic", {
+          epic_id: "non-existent",
           title: "New title",
         }) as { success: boolean };
 
