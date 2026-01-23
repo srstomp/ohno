@@ -35,7 +35,7 @@ Or for a specific project (`.claude/settings.local.json` or `.mcp.json`):
 }
 ```
 
-## MCP Tools (20 total)
+## MCP Tools (28 total)
 
 ### Query Tools
 | Tool | Description |
@@ -46,6 +46,7 @@ Or for a specific project (`.claude/settings.local.json` or `.mcp.json`):
 | `get_task` | Full details for a specific task |
 | `get_next_task` | Recommended task based on priority |
 | `get_blocked_tasks` | All blocked tasks with reasons |
+| `get_kanban_board` | Tasks organized by status columns |
 
 ### Update Tools
 | Tool | Description |
@@ -60,10 +61,25 @@ Or for a specific project (`.claude/settings.local.json` or `.mcp.json`):
 ### CRUD Tools
 | Tool | Description |
 |------|-------------|
-| `create_story` | Create new story to organize tasks under |
 | `create_task` | Create new task, optionally under a story |
 | `update_task` | Modify task details |
 | `archive_task` | Archive task (soft delete) |
+
+### Story Tools
+| Tool | Description |
+|------|-------------|
+| `create_story` | Create new story to organize tasks under |
+| `get_story` | Get full details for a specific story |
+| `list_stories` | List stories with optional filtering by epic/status |
+| `update_story` | Update story fields (title, description, status, epic_id) |
+
+### Epic Tools
+| Tool | Description |
+|------|-------------|
+| `create_epic` | Create new epic to organize stories under |
+| `get_epic` | Get full details for a specific epic |
+| `get_epics` | List epics with optional filtering by status/priority |
+| `update_epic` | Update epic fields (title, description, priority, status) |
 
 ### Dependency Tools
 | Tool | Description |
