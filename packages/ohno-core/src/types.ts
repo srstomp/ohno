@@ -190,6 +190,16 @@ export interface GetEpicsOptions {
 }
 
 /**
+ * Options for querying stories
+ */
+export interface GetStoriesOptions {
+  epic_id?: string | null;
+  status?: StoryStatus;
+  limit?: number;
+  offset?: number;
+}
+
+/**
  * Options for querying tasks
  */
 export interface GetTasksOptions {
