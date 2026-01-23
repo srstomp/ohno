@@ -15,6 +15,7 @@ export type {
   CreateEpicOptions,
   GetTasksOptions,
   GetEpicsOptions,
+  GetStoriesOptions,
   TaskStatus,
   TaskType,
   Priority,
@@ -23,6 +24,9 @@ export type {
   TaskCompletionBoundaries,
   UpdateStatusResult,
   Epic,
+  Story,
+  StoryStatus,
+  UpdateStoryOptions,
 } from "./types.js";
 
 export { toDict } from "./types.js";
