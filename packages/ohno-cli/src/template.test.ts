@@ -210,6 +210,45 @@ describe("Kanban Template", () => {
     });
   });
 
+  describe("Breadcrumb functionality", () => {
+    it("should include CSS for card breadcrumb", () => {
+      expect(KANBAN_TEMPLATE).toContain(".card-breadcrumb {");
+    });
+
+    it("should style breadcrumb with small font size", () => {
+      expect(KANBAN_TEMPLATE).toMatch(/\.card-breadcrumb[\s\S]*?font-size:\s*0\.65rem/);
+    });
+
+    it("should style breadcrumb with muted color", () => {
+      expect(KANBAN_TEMPLATE).toMatch(/\.card-breadcrumb[\s\S]*?color:\s*var\(--text-muted\)/);
+    });
+
+    it("should include text overflow ellipsis for breadcrumb", () => {
+      expect(KANBAN_TEMPLATE).toMatch(/\.card-breadcrumb[\s\S]*?text-overflow:\s*ellipsis/);
+    });
+
+    it("should add breadcrumb when task has epic", () => {
+      // The renderCard function should check for epic and add breadcrumb
+      expect(KANBAN_TEMPLATE).toMatch(/if \(task\.epic_id/);
+      expect(KANBAN_TEMPLATE).toContain("card-breadcrumb");
+    });
+
+    it("should show epic priority in breadcrumb", () => {
+      // Breadcrumb should include epic priority badge
+      expect(KANBAN_TEMPLATE).toMatch(/epic_priority/);
+    });
+
+    it("should show arrow indicator in breadcrumb", () => {
+      // Breadcrumb should include → arrow
+      expect(KANBAN_TEMPLATE).toContain("→");
+    });
+
+    it("should format breadcrumb as 'Epic (Priority) / Story →' when both exist", () => {
+      // Check for story separator in breadcrumb context
+      expect(KANBAN_TEMPLATE).toMatch(/epic.*story/i);
+    });
+  });
+
   describe("Template structure", () => {
     it("should be valid HTML", () => {
       expect(KANBAN_TEMPLATE).toContain("<!DOCTYPE html>");

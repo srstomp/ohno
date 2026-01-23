@@ -209,6 +209,15 @@ export const KANBAN_TEMPLATE = `<!DOCTYPE html>
         .card-meta { display: flex; justify-content: space-between; font-size: 0.7rem; color: var(--text-muted); }
         .card-type { background: var(--bg-secondary); padding: 0.1rem 0.3rem; border-radius: 3px; }
 
+        .card-breadcrumb {
+            font-size: 0.65rem;
+            color: var(--text-muted);
+            margin-bottom: 0.375rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
         .card-hierarchy {
             font-size: 0.65rem;
             color: var(--text-secondary);
@@ -769,6 +778,20 @@ export const KANBAN_TEMPLATE = `<!DOCTYPE html>
 
         function renderCard(task) {
             let html = '<div class="card" data-id="' + esc(task.id) + '">';
+
+            // Breadcrumb at top showing Epic > Story path
+            if (task.epic_id && task.epic_title) {
+                html += '<div class="card-breadcrumb">';
+                html += esc(task.epic_title);
+                if (task.epic_priority) {
+                    html += ' <span class="card-priority priority-' + esc(task.epic_priority) + '">' + esc(task.epic_priority) + '</span>';
+                }
+                if (task.story_id && task.story_title) {
+                    html += ' / ' + esc(task.story_title);
+                }
+                html += ' →</div>';
+            }
+
             html += '<div class="card-header"><span class="card-id">' + esc(task.id) + '</span>';
             if (task.epic_priority) html += '<span class="card-priority priority-' + esc(task.epic_priority) + '">' + esc(task.epic_priority) + '</span>';
             html += '</div><div class="card-title">' + esc(task.title) + '</div>';
