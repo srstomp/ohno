@@ -17,6 +17,7 @@ import {
   UpdateStatusSchema,
   CreateTaskSchema,
   CreateStorySchema,
+  StoryIdSchema,
   UpdateTaskSchema,
   ActivitySchema,
   HandoffNotesSchema,
@@ -47,8 +48,8 @@ describe("MCP Server", () => {
   });
 
   describe("Tool Definitions", () => {
-    it("should have 25 tools defined", () => {
-      expect(TOOLS.length).toBe(25);
+    it("should have 26 tools defined", () => {
+      expect(TOOLS.length).toBe(26);
     });
 
     it("should have unique tool names", () => {
@@ -227,6 +228,21 @@ describe("MCP Server", () => {
 
       it("should reject empty title", () => {
         expect(() => CreateStorySchema.parse({ title: "" })).toThrow(ZodError);
+      });
+    });
+
+    describe("StoryIdSchema", () => {
+      it("should accept valid story_id", () => {
+        const result = StoryIdSchema.parse({ story_id: "story-abc123" });
+        expect(result.story_id).toBe("story-abc123");
+      });
+
+      it("should reject empty story_id", () => {
+        expect(() => StoryIdSchema.parse({ story_id: "" })).toThrow(ZodError);
+      });
+
+      it("should reject missing story_id", () => {
+        expect(() => StoryIdSchema.parse({})).toThrow(ZodError);
       });
     });
 
@@ -449,6 +465,19 @@ describe("MCP Server", () => {
         expect(taskResult.success).toBe(true);
         const task = db.getTask(taskResult.task_id);
         expect(task?.story_id).toBe(storyResult.story_id);
+      });
+    });
+
+    describe("get_story", () => {
+      it("should return story by ID", async () => {
+        const storyId = db.createStory({ title: "Test story" });
+        const result = await handleTool("get_story", { story_id: storyId }) as { title: string };
+        expect(result.title).toBe("Test story");
+      });
+
+      it("should return error for non-existent story", async () => {
+        const result = await handleTool("get_story", { story_id: "non-existent" }) as { error: string };
+        expect(result.error).toContain("Story not found");
       });
     });
 
