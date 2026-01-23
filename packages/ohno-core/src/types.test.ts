@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import type { Story, StoryStatus } from "./types.js";
+import type { Story, StoryStatus, GetStoriesOptions } from "./types.js";
 
 describe("Story Types", () => {
   describe("StoryStatus", () => {
@@ -96,6 +96,62 @@ describe("Story Types", () => {
       expect(story).toHaveProperty("status");
       expect(story).toHaveProperty("created_at");
       expect(story).toHaveProperty("updated_at");
+    });
+  });
+
+  describe("GetStoriesOptions Interface", () => {
+    it("should allow filtering by epic_id", () => {
+      const options: GetStoriesOptions = {
+        epic_id: "epic-123",
+      };
+
+      expect(options.epic_id).toBe("epic-123");
+    });
+
+    it("should allow filtering by null epic_id for orphan stories", () => {
+      const options: GetStoriesOptions = {
+        epic_id: null,
+      };
+
+      expect(options.epic_id).toBeNull();
+    });
+
+    it("should allow filtering by status", () => {
+      const options: GetStoriesOptions = {
+        status: "in_progress",
+      };
+
+      expect(options.status).toBe("in_progress");
+    });
+
+    it("should support pagination with limit and offset", () => {
+      const options: GetStoriesOptions = {
+        limit: 10,
+        offset: 20,
+      };
+
+      expect(options.limit).toBe(10);
+      expect(options.offset).toBe(20);
+    });
+
+    it("should allow all fields to be optional", () => {
+      const options: GetStoriesOptions = {};
+
+      expect(options).toBeDefined();
+    });
+
+    it("should allow combination of filters", () => {
+      const options: GetStoriesOptions = {
+        epic_id: "epic-456",
+        status: "done",
+        limit: 5,
+        offset: 0,
+      };
+
+      expect(options.epic_id).toBe("epic-456");
+      expect(options.status).toBe("done");
+      expect(options.limit).toBe(5);
+      expect(options.offset).toBe(0);
     });
   });
 });
