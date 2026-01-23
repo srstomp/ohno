@@ -16,6 +16,7 @@ import type {
   SessionContext,
   CreateTaskOptions,
   CreateStoryOptions,
+  UpdateStoryOptions,
   CreateEpicOptions,
   GetTasksOptions,
   GetEpicsOptions,
@@ -586,6 +587,45 @@ export class TaskDatabase {
 
     stmt.free();
     return null;
+  }
+
+  /**
+   * Update story fields
+   */
+  updateStory(storyId: string, updates: UpdateStoryOptions): boolean {
+    const story = this.getStory(storyId);
+    if (!story) {
+      return false;
+    }
+
+    const allowedFields = ["title", "description", "status", "epic_id"];
+    const setClauses: string[] = [];
+    const params: unknown[] = [];
+
+    for (const field of allowedFields) {
+      if (field in updates) {
+        setClauses.push(`${field} = ?`);
+        params.push(updates[field as keyof UpdateStoryOptions]);
+      }
+    }
+
+    if (setClauses.length === 0) {
+      return false;
+    }
+
+    setClauses.push("updated_at = ?");
+    params.push(getTimestamp());
+    params.push(storyId);
+
+    const sql = `UPDATE stories SET ${setClauses.join(", ")} WHERE id = ?`;
+    this.db.run(sql, params as initSqlJs.BindParams);
+
+    const changes = this.db.getRowsModified();
+    if (changes > 0) {
+      this.save();
+    }
+
+    return changes > 0;
   }
 
   /**

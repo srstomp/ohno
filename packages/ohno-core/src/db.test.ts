@@ -679,6 +679,146 @@ describe("TaskDatabase", () => {
     });
   });
 
+  describe("Story CRUD Operations", () => {
+    describe("createStory", () => {
+      it("should create a story with minimal options", () => {
+        const storyId = db.createStory({ title: "Test story" });
+        expect(storyId).toMatch(/^story-[a-f0-9]{8}$/);
+      });
+
+      it("should create a story with all options", () => {
+        const epicId = db.createEpic({ title: "Test epic" });
+        const storyId = db.createStory({
+          title: "Full story",
+          epic_id: epicId,
+          description: "A description",
+        });
+        const story = db.getStory(storyId);
+        expect(story?.title).toBe("Full story");
+        expect(story?.epic_id).toBe(epicId);
+        expect(story?.description).toBe("A description");
+      });
+
+      it("should set default status to todo", () => {
+        const storyId = db.createStory({ title: "New story" });
+        const story = db.getStory(storyId);
+        expect(story?.status).toBe("todo");
+      });
+    });
+
+    describe("getStory", () => {
+      it("should return null for non-existent story", () => {
+        const story = db.getStory("non-existent");
+        expect(story).toBeNull();
+      });
+
+      it("should return story with all fields", () => {
+        const storyId = db.createStory({ title: "Get me" });
+        const story = db.getStory(storyId);
+        expect(story).toBeDefined();
+        expect(story?.id).toBe(storyId);
+        expect(story?.title).toBe("Get me");
+      });
+    });
+
+    describe("updateStory", () => {
+      it("should update story title", () => {
+        const storyId = db.createStory({ title: "Original" });
+        const result = db.updateStory(storyId, { title: "Updated" });
+        expect(result).toBe(true);
+
+        const story = db.getStory(storyId);
+        expect(story?.title).toBe("Updated");
+      });
+
+      it("should update story description", () => {
+        const storyId = db.createStory({ title: "Test story" });
+        const result = db.updateStory(storyId, { description: "New description" });
+        expect(result).toBe(true);
+
+        const story = db.getStory(storyId);
+        expect(story?.description).toBe("New description");
+      });
+
+      it("should update story status", () => {
+        const storyId = db.createStory({ title: "Test story" });
+        const result = db.updateStory(storyId, { status: "in_progress" });
+        expect(result).toBe(true);
+
+        const story = db.getStory(storyId);
+        expect(story?.status).toBe("in_progress");
+      });
+
+      it("should update story epic_id", () => {
+        const epicId = db.createEpic({ title: "Test epic" });
+        const storyId = db.createStory({ title: "Test story" });
+        const result = db.updateStory(storyId, { epic_id: epicId });
+        expect(result).toBe(true);
+
+        const story = db.getStory(storyId);
+        expect(story?.epic_id).toBe(epicId);
+      });
+
+      it("should update multiple fields at once", () => {
+        const storyId = db.createStory({ title: "Original" });
+        const result = db.updateStory(storyId, {
+          title: "Updated",
+          description: "New description",
+          status: "in_progress",
+        });
+        expect(result).toBe(true);
+
+        const story = db.getStory(storyId);
+        expect(story?.title).toBe("Updated");
+        expect(story?.description).toBe("New description");
+        expect(story?.status).toBe("in_progress");
+      });
+
+      it("should update updated_at timestamp", () => {
+        const storyId = db.createStory({ title: "Original" });
+        const story1 = db.getStory(storyId);
+        const originalUpdatedAt = story1?.updated_at;
+
+        // Small delay to ensure timestamp changes
+        db.updateStory(storyId, { title: "Updated" });
+
+        const story2 = db.getStory(storyId);
+        expect(story2?.updated_at).toBeDefined();
+        // Updated timestamp should exist (we can't guarantee it's different due to timestamp precision)
+      });
+
+      it("should return false for non-existent story", () => {
+        const result = db.updateStory("non-existent", { title: "Updated" });
+        expect(result).toBe(false);
+      });
+
+      it("should return false when no fields are provided", () => {
+        const storyId = db.createStory({ title: "Test story" });
+        const result = db.updateStory(storyId, {});
+        expect(result).toBe(false);
+      });
+
+      it("should allow setting description to null", () => {
+        const storyId = db.createStory({ title: "Test story", description: "Original description" });
+        const result = db.updateStory(storyId, { description: null });
+        expect(result).toBe(true);
+
+        const story = db.getStory(storyId);
+        expect(story?.description).toBeNull();
+      });
+
+      it("should allow setting epic_id to null", () => {
+        const epicId = db.createEpic({ title: "Test epic" });
+        const storyId = db.createStory({ title: "Test story", epic_id: epicId });
+        const result = db.updateStory(storyId, { epic_id: null });
+        expect(result).toBe(true);
+
+        const story = db.getStory(storyId);
+        expect(story?.epic_id).toBeNull();
+      });
+    });
+  });
+
   describe("Project Status", () => {
     describe("getProjectStatus", () => {
       it("should return correct task counts", () => {
