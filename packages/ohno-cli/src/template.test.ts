@@ -249,6 +249,36 @@ describe("Kanban Template", () => {
     });
   });
 
+  describe("Orphan indicator functionality", () => {
+    it("should include CSS for orphan indicator", () => {
+      expect(KANBAN_TEMPLATE).toContain(".card-orphan {");
+    });
+
+    it("should style orphan indicator with small font size", () => {
+      expect(KANBAN_TEMPLATE).toMatch(/\.card-orphan[\s\S]*?font-size:\s*0\.6rem/);
+    });
+
+    it("should style orphan indicator with orange color", () => {
+      expect(KANBAN_TEMPLATE).toMatch(/\.card-orphan[\s\S]*?color:\s*var\(--orange\)/);
+    });
+
+    it("should check for missing story_id in renderCard", () => {
+      // The renderCard function should check if task has no story_id
+      expect(KANBAN_TEMPLATE).toMatch(/if \(!task\.story_id\)/);
+    });
+
+    it("should display orphan indicator for tasks without story", () => {
+      // Should show warning icon and text for orphaned tasks
+      expect(KANBAN_TEMPLATE).toContain("card-orphan");
+      expect(KANBAN_TEMPLATE).toContain("No story");
+    });
+
+    it("should use warning symbol for orphan indicator", () => {
+      // Should include a warning or alert symbol
+      expect(KANBAN_TEMPLATE).toMatch(/[⚠\u26A0]/);
+    });
+  });
+
   describe("Template structure", () => {
     it("should be valid HTML", () => {
       expect(KANBAN_TEMPLATE).toContain("<!DOCTYPE html>");

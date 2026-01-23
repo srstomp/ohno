@@ -243,6 +243,12 @@ export const KANBAN_TEMPLATE = `<!DOCTYPE html>
             margin-left: auto;
         }
 
+        .card-orphan {
+            font-size: 0.6rem;
+            color: var(--orange);
+            opacity: 0.8;
+        }
+
         .group-header {
             padding: 0.5rem;
             font-size: 0.75rem;
@@ -778,6 +784,11 @@ export const KANBAN_TEMPLATE = `<!DOCTYPE html>
 
         function renderCard(task) {
             let html = '<div class="card" data-id="' + esc(task.id) + '">';
+
+            // Orphan indicator for tasks without story assignment
+            if (!task.story_id) {
+                html += '<div class="card-orphan">⚠ No story</div>';
+            }
 
             // Breadcrumb at top showing Epic > Story path
             if (task.epic_id && task.epic_title) {
