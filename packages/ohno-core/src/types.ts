@@ -128,6 +128,24 @@ export interface CreateStoryOptions {
 }
 
 /**
+ * Story status enum
+ */
+export type StoryStatus = "todo" | "in_progress" | "done";
+
+/**
+ * Story record - groups related tasks under an epic
+ */
+export interface Story {
+  id: string;
+  epic_id: string | null;
+  title: string;
+  description: string | null;
+  status: StoryStatus;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
  * Epic record - high-level grouping of stories
  */
 export interface Epic {
