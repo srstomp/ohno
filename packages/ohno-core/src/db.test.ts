@@ -819,6 +819,184 @@ describe("TaskDatabase", () => {
     });
   });
 
+  describe("getStories", () => {
+    it("should return empty array when no stories exist", () => {
+      const stories = db.getStories();
+      expect(stories).toEqual([]);
+    });
+
+    it("should return all stories without options", () => {
+      const story1 = db.createStory({ title: "Story 1" });
+      const story2 = db.createStory({ title: "Story 2" });
+      const story3 = db.createStory({ title: "Story 3" });
+
+      const stories = db.getStories();
+      expect(stories.length).toBe(3);
+      expect(stories.map(s => s.id)).toContain(story1);
+      expect(stories.map(s => s.id)).toContain(story2);
+      expect(stories.map(s => s.id)).toContain(story3);
+    });
+
+    it("should filter by epic_id", () => {
+      const epic1 = db.createEpic({ title: "Epic 1" });
+      const epic2 = db.createEpic({ title: "Epic 2" });
+
+      const story1 = db.createStory({ title: "Story 1", epic_id: epic1 });
+      const story2 = db.createStory({ title: "Story 2", epic_id: epic2 });
+      const story3 = db.createStory({ title: "Story 3", epic_id: epic1 });
+
+      const stories = db.getStories({ epic_id: epic1 });
+      expect(stories.length).toBe(2);
+      expect(stories.map(s => s.id)).toContain(story1);
+      expect(stories.map(s => s.id)).toContain(story3);
+      expect(stories.map(s => s.id)).not.toContain(story2);
+    });
+
+    it("should filter by epic_id === null (orphan stories)", () => {
+      const epic1 = db.createEpic({ title: "Epic 1" });
+
+      const orphan1 = db.createStory({ title: "Orphan 1" });
+      const orphan2 = db.createStory({ title: "Orphan 2" });
+      const withEpic = db.createStory({ title: "With Epic", epic_id: epic1 });
+
+      const stories = db.getStories({ epic_id: null });
+      expect(stories.length).toBe(2);
+      expect(stories.map(s => s.id)).toContain(orphan1);
+      expect(stories.map(s => s.id)).toContain(orphan2);
+      expect(stories.map(s => s.id)).not.toContain(withEpic);
+    });
+
+    it("should filter by status", () => {
+      const story1 = db.createStory({ title: "Story 1" });
+      const story2 = db.createStory({ title: "Story 2" });
+      const story3 = db.createStory({ title: "Story 3" });
+
+      db.updateStory(story1, { status: "in_progress" });
+      db.updateStory(story2, { status: "done" });
+      // story3 remains "todo"
+
+      const inProgress = db.getStories({ status: "in_progress" });
+      expect(inProgress.length).toBe(1);
+      expect(inProgress[0].id).toBe(story1);
+
+      const done = db.getStories({ status: "done" });
+      expect(done.length).toBe(1);
+      expect(done[0].id).toBe(story2);
+
+      const todo = db.getStories({ status: "todo" });
+      expect(todo.length).toBe(1);
+      expect(todo[0].id).toBe(story3);
+    });
+
+    it("should combine epic_id and status filters", () => {
+      const epic1 = db.createEpic({ title: "Epic 1" });
+
+      const story1 = db.createStory({ title: "Story 1", epic_id: epic1 });
+      const story2 = db.createStory({ title: "Story 2", epic_id: epic1 });
+      const story3 = db.createStory({ title: "Story 3", epic_id: epic1 });
+
+      db.updateStory(story1, { status: "in_progress" });
+      db.updateStory(story2, { status: "done" });
+      // story3 remains "todo"
+
+      const stories = db.getStories({ epic_id: epic1, status: "in_progress" });
+      expect(stories.length).toBe(1);
+      expect(stories[0].id).toBe(story1);
+    });
+
+    it("should respect limit option", () => {
+      db.createStory({ title: "Story 1" });
+      db.createStory({ title: "Story 2" });
+      db.createStory({ title: "Story 3" });
+      db.createStory({ title: "Story 4" });
+
+      const stories = db.getStories({ limit: 2 });
+      expect(stories.length).toBe(2);
+    });
+
+    it("should respect offset option", () => {
+      const story1 = db.createStory({ title: "Story 1" });
+      const story2 = db.createStory({ title: "Story 2" });
+      const story3 = db.createStory({ title: "Story 3" });
+
+      // Stories are ordered by updated_at DESC, created_at DESC
+      // So the most recent is first
+      const stories = db.getStories({ offset: 1, limit: 2 });
+      expect(stories.length).toBe(2);
+      // Should skip the first story
+    });
+
+    it("should respect limit and offset together", () => {
+      db.createStory({ title: "Story 1" });
+      db.createStory({ title: "Story 2" });
+      db.createStory({ title: "Story 3" });
+      db.createStory({ title: "Story 4" });
+
+      const page1 = db.getStories({ limit: 2, offset: 0 });
+      expect(page1.length).toBe(2);
+
+      const page2 = db.getStories({ limit: 2, offset: 2 });
+      expect(page2.length).toBe(2);
+
+      // Ensure no overlap
+      const page1Ids = page1.map(s => s.id);
+      const page2Ids = page2.map(s => s.id);
+      expect(page1Ids).not.toContain(page2Ids[0]);
+      expect(page1Ids).not.toContain(page2Ids[1]);
+    });
+
+    it("should return Story objects with all required fields", () => {
+      const epicId = db.createEpic({ title: "Epic 1" });
+      const storyId = db.createStory({
+        title: "Full Story",
+        epic_id: epicId,
+        description: "A description",
+      });
+
+      const stories = db.getStories();
+      expect(stories.length).toBe(1);
+
+      const story = stories[0];
+      expect(story.id).toBe(storyId);
+      expect(story.title).toBe("Full Story");
+      expect(story.epic_id).toBe(epicId);
+      expect(story.description).toBe("A description");
+      expect(story.status).toBe("todo");
+      expect(story.created_at).toBeDefined();
+      expect(story.updated_at).toBeDefined();
+    });
+
+    it("should handle null epic_id in returned stories", () => {
+      const storyId = db.createStory({ title: "Orphan Story" });
+
+      const stories = db.getStories();
+      expect(stories.length).toBe(1);
+      expect(stories[0].epic_id).toBeNull();
+    });
+
+    it("should handle null description in returned stories", () => {
+      const storyId = db.createStory({ title: "No Description" });
+
+      const stories = db.getStories();
+      expect(stories.length).toBe(1);
+      expect(stories[0].description).toBeNull();
+    });
+
+    it("should order stories by updated_at DESC, created_at DESC", () => {
+      const story1 = db.createStory({ title: "Story 1" });
+      const story2 = db.createStory({ title: "Story 2" });
+      const story3 = db.createStory({ title: "Story 3" });
+
+      // Update story1 to make it the most recently updated
+      db.updateStory(story1, { description: "Updated" });
+
+      const stories = db.getStories();
+      expect(stories.length).toBe(3);
+      // story1 should be first because it was most recently updated
+      expect(stories[0].id).toBe(story1);
+    });
+  });
+
   describe("Project Status", () => {
     describe("getProjectStatus", () => {
       it("should return correct task counts", () => {
