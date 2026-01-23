@@ -27,6 +27,7 @@ import {
   DependencySchema,
   RemoveDependencySchema,
   SummarizeSchema,
+  GetStoriesSchema,
 } from "./server.js";
 
 describe("MCP Server", () => {
@@ -48,8 +49,8 @@ describe("MCP Server", () => {
   });
 
   describe("Tool Definitions", () => {
-    it("should have 26 tools defined", () => {
-      expect(TOOLS.length).toBe(26);
+    it("should have 27 tools defined", () => {
+      expect(TOOLS.length).toBe(27);
     });
 
     it("should have unique tool names", () => {
@@ -318,6 +319,73 @@ describe("MCP Server", () => {
         ).toThrow(ZodError);
       });
     });
+
+    describe("GetStoriesSchema", () => {
+      it("should accept empty object with defaults", () => {
+        const result = GetStoriesSchema.parse({});
+        expect(result.limit).toBe(50);
+        expect(result.offset).toBe(0);
+      });
+
+      it("should accept epic_id filter", () => {
+        const result = GetStoriesSchema.parse({ epic_id: "epic-123" });
+        expect(result.epic_id).toBe("epic-123");
+      });
+
+      it("should accept valid story status", () => {
+        const result = GetStoriesSchema.parse({ status: "in_progress" });
+        expect(result.status).toBe("in_progress");
+      });
+
+      it("should accept all valid story statuses", () => {
+        const validStatuses = ["todo", "in_progress", "done"];
+        for (const status of validStatuses) {
+          const result = GetStoriesSchema.parse({ status });
+          expect(result.status).toBe(status);
+        }
+      });
+
+      it("should reject invalid story status", () => {
+        expect(() => GetStoriesSchema.parse({ status: "review" })).toThrow(ZodError);
+        expect(() => GetStoriesSchema.parse({ status: "blocked" })).toThrow(ZodError);
+        expect(() => GetStoriesSchema.parse({ status: "invalid" })).toThrow(ZodError);
+      });
+
+      it("should accept valid limit", () => {
+        const result = GetStoriesSchema.parse({ limit: 25 });
+        expect(result.limit).toBe(25);
+      });
+
+      it("should reject limit below minimum", () => {
+        expect(() => GetStoriesSchema.parse({ limit: 0 })).toThrow(ZodError);
+      });
+
+      it("should reject limit above maximum", () => {
+        expect(() => GetStoriesSchema.parse({ limit: 101 })).toThrow(ZodError);
+      });
+
+      it("should accept valid offset", () => {
+        const result = GetStoriesSchema.parse({ offset: 10 });
+        expect(result.offset).toBe(10);
+      });
+
+      it("should reject negative offset", () => {
+        expect(() => GetStoriesSchema.parse({ offset: -1 })).toThrow(ZodError);
+      });
+
+      it("should accept all filters together", () => {
+        const result = GetStoriesSchema.parse({
+          epic_id: "epic-1",
+          status: "todo",
+          limit: 20,
+          offset: 5,
+        });
+        expect(result.epic_id).toBe("epic-1");
+        expect(result.status).toBe("todo");
+        expect(result.limit).toBe(20);
+        expect(result.offset).toBe(5);
+      });
+    });
   });
 
   describe("Tool Handlers", () => {
@@ -478,6 +546,102 @@ describe("MCP Server", () => {
       it("should return error for non-existent story", async () => {
         const result = await handleTool("get_story", { story_id: "non-existent" }) as { error: string };
         expect(result.error).toContain("Story not found");
+      });
+    });
+
+    describe("list_stories", () => {
+      it("should return empty stories list initially", async () => {
+        const result = await handleTool("list_stories", {}) as { stories: unknown[] };
+        expect(result.stories).toEqual([]);
+      });
+
+      it("should return created stories", async () => {
+        db.createStory({ title: "Story 1" });
+        db.createStory({ title: "Story 2" });
+        const result = await handleTool("list_stories", {}) as { stories: unknown[] };
+        expect(result.stories.length).toBe(2);
+      });
+
+      it("should filter by epic_id", async () => {
+        // Create an epic
+        const dbInstance = db as unknown as { db: { run: (sql: string, params?: unknown[]) => void } };
+        dbInstance.db.run(
+          "INSERT INTO epics (id, title, priority) VALUES (?, ?, ?)",
+          ["epic-1", "Epic 1", "P0"]
+        );
+
+        // Create stories with different epics
+        db.createStory({ title: "Story in epic 1", epic_id: "epic-1" });
+        db.createStory({ title: "Story in epic 1 (2)", epic_id: "epic-1" });
+        db.createStory({ title: "Story without epic" });
+
+        const result = await handleTool("list_stories", { epic_id: "epic-1" }) as {
+          stories: Array<{ title: string }>;
+        };
+        expect(result.stories.length).toBe(2);
+        expect(result.stories[0].title).toContain("epic 1");
+      });
+
+      it("should filter by status", async () => {
+        const storyId1 = db.createStory({ title: "Todo story" });
+        const storyId2 = db.createStory({ title: "In progress story" });
+        const storyId3 = db.createStory({ title: "Done story" });
+
+        // Update statuses
+        db.updateStory(storyId2, { status: "in_progress" });
+        db.updateStory(storyId3, { status: "done" });
+
+        const result = await handleTool("list_stories", { status: "in_progress" }) as {
+          stories: Array<{ title: string; status: string }>;
+        };
+        expect(result.stories.length).toBe(1);
+        expect(result.stories[0].title).toBe("In progress story");
+        expect(result.stories[0].status).toBe("in_progress");
+      });
+
+      it("should respect limit parameter", async () => {
+        for (let i = 0; i < 10; i++) {
+          db.createStory({ title: `Story ${i}` });
+        }
+
+        const result = await handleTool("list_stories", { limit: 5 }) as { stories: unknown[] };
+        expect(result.stories.length).toBe(5);
+      });
+
+      it("should respect offset parameter", async () => {
+        for (let i = 0; i < 10; i++) {
+          db.createStory({ title: `Story ${i}` });
+        }
+
+        const result = await handleTool("list_stories", { offset: 8 }) as { stories: unknown[] };
+        expect(result.stories.length).toBe(2);
+      });
+
+      it("should combine filters", async () => {
+        const dbInstance = db as unknown as { db: { run: (sql: string, params?: unknown[]) => void } };
+        dbInstance.db.run(
+          "INSERT INTO epics (id, title, priority) VALUES (?, ?, ?)",
+          ["epic-1", "Epic 1", "P0"]
+        );
+
+        const story1 = db.createStory({ title: "Story 1", epic_id: "epic-1" });
+        const story2 = db.createStory({ title: "Story 2", epic_id: "epic-1" });
+        const story3 = db.createStory({ title: "Story 3", epic_id: "epic-1" });
+
+        db.updateStory(story1, { status: "todo" });
+        db.updateStory(story2, { status: "in_progress" });
+        db.updateStory(story3, { status: "in_progress" });
+
+        const result = await handleTool("list_stories", {
+          epic_id: "epic-1",
+          status: "in_progress",
+          limit: 10,
+        }) as { stories: Array<{ status: string }> };
+
+        expect(result.stories.length).toBe(2);
+        for (const story of result.stories) {
+          expect(story.status).toBe("in_progress");
+        }
       });
     });
 

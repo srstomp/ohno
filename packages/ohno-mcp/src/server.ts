@@ -110,6 +110,13 @@ const StoryIdSchema = z.object({
   story_id: z.string().min(1),
 });
 
+const GetStoriesSchema = z.object({
+  epic_id: z.string().optional(),
+  status: z.enum(["todo", "in_progress", "done"]).optional(),
+  limit: z.number().min(1).max(100).default(50),
+  offset: z.number().min(0).default(0),
+});
+
 const UpdateEpicSchema = z.object({
   epic_id: z.string().min(1),
   title: z.string().optional(),
@@ -290,6 +297,19 @@ const TOOLS = [
     },
   },
   {
+    name: "list_stories",
+    description: "List stories with optional filtering by epic and status",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        epic_id: { type: "string", description: "Filter by epic ID" },
+        status: { type: "string", enum: ["todo", "in_progress", "done"], description: "Filter by story status" },
+        limit: { type: "number", description: "Maximum stories to return (1-100)", default: 50 },
+        offset: { type: "number", description: "Number of stories to skip", default: 0 },
+      },
+    },
+  },
+  {
     name: "create_epic",
     description: "Create a new epic to organize stories under",
     inputSchema: {
@@ -437,6 +457,7 @@ export {
   CreateTaskSchema,
   CreateStorySchema,
   StoryIdSchema,
+  GetStoriesSchema,
   CreateEpicSchema,
   EpicIdSchema,
   UpdateEpicSchema,
@@ -583,6 +604,11 @@ export async function handleTool(name: string, args: Record<string, unknown>): P
         return { error: `Story not found: ${parsed.story_id}` };
       }
       return story;
+    }
+
+    case "list_stories": {
+      const parsed = GetStoriesSchema.parse(args);
+      return { stories: database.getStories(parsed) };
     }
 
     case "create_epic": {
