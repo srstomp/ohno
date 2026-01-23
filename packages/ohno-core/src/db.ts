@@ -19,12 +19,14 @@ import type {
   UpdateStoryOptions,
   CreateEpicOptions,
   GetTasksOptions,
+  GetStoriesOptions,
   GetEpicsOptions,
   TaskStatus,
   DependencyType,
   TaskCompletionBoundaries,
   UpdateStatusResult,
   Epic,
+  Story,
 } from "./types.js";
 import {
   generateTaskId,
@@ -626,6 +628,51 @@ export class TaskDatabase {
     }
 
     return changes > 0;
+  }
+
+  /**
+   * Get stories with optional filtering
+   */
+  getStories(opts: GetStoriesOptions = {}): Story[] {
+    const { epic_id, status, limit = 50, offset = 0 } = opts;
+
+    let sql = "SELECT * FROM stories";
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+
+    // Handle epic_id filter (including null for orphan stories)
+    if (epic_id !== undefined) {
+      if (epic_id === null) {
+        conditions.push("epic_id IS NULL");
+      } else {
+        conditions.push("epic_id = ?");
+        params.push(epic_id);
+      }
+    }
+
+    if (status) {
+      conditions.push("status = ?");
+      params.push(status);
+    }
+
+    if (conditions.length > 0) {
+      sql += ` WHERE ${conditions.join(" AND ")}`;
+    }
+
+    sql += " ORDER BY updated_at DESC, created_at DESC";
+    sql += " LIMIT ? OFFSET ?";
+    params.push(limit, offset);
+
+    const stmt = this.db.prepare(sql);
+    stmt.bind(params as initSqlJs.BindParams);
+
+    const rows: Story[] = [];
+    while (stmt.step()) {
+      rows.push(stmt.getAsObject() as unknown as Story);
+    }
+    stmt.free();
+
+    return rows;
   }
 
   /**
