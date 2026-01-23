@@ -234,6 +234,20 @@ export const KANBAN_TEMPLATE = `<!DOCTYPE html>
             margin-left: auto;
         }
 
+        .group-header {
+            padding: 0.5rem;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            border-bottom: 1px solid var(--border);
+            margin-top: 0.5rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .group-header:first-child { margin-top: 0; }
+        .group-name { display: flex; align-items: center; gap: 0.5rem; }
+
         .empty { text-align: center; padding: 2rem 1rem; color: var(--text-muted); font-size: 0.8rem; }
 
         .no-data {
@@ -556,7 +570,7 @@ export const KANBAN_TEMPLATE = `<!DOCTYPE html>
 
         let data = window.KANBAN_DATA || {};
         let lastSync = data.synced_at;
-        let filters = { epic: '', priority: '', type: '', story: '' };
+        let filters = { epic: '', priority: '', type: '', story: '', groupBy: 'none' };
         let currentTaskId = null;
 
         function init() {
@@ -621,16 +635,19 @@ export const KANBAN_TEMPLATE = `<!DOCTYPE html>
             (data.stories||[]).forEach(s => { filterHtml += '<option value="' + esc(s.id) + '">' + esc(s.title) + '</option>'; });
             filterHtml += '</select></div><div class="filter-group"><span class="filter-label">Priority</span><select class="filter-select" id="filterPriority"><option value="">All</option><option value="P0">P0</option><option value="P1">P1</option><option value="P2">P2</option></select></div>';
             filterHtml += '<div class="filter-group"><span class="filter-label">Type</span><select class="filter-select" id="filterType"><option value="">All</option><option value="feature">Feature</option><option value="bug">Bug</option><option value="chore">Chore</option><option value="spike">Spike</option><option value="test">Test</option></select></div>';
+            filterHtml += '<div class="filter-group"><span class="filter-label">Group By</span><select class="filter-select" id="filterGroupBy"><option value="none">None</option><option value="epic">Epic</option><option value="story">Story</option></select></div>';
             filtersEl.innerHTML = filterHtml;
             app.appendChild(filtersEl);
             document.getElementById('filterEpic').value = filters.epic;
             document.getElementById('filterStory').value = filters.story;
             document.getElementById('filterPriority').value = filters.priority;
             document.getElementById('filterType').value = filters.type;
+            document.getElementById('filterGroupBy').value = filters.groupBy;
             document.getElementById('filterEpic').onchange = function() { setFilter('epic', this.value); };
             document.getElementById('filterStory').onchange = function() { setFilter('story', this.value); };
             document.getElementById('filterPriority').onchange = function() { setFilter('priority', this.value); };
             document.getElementById('filterType').onchange = function() { setFilter('type', this.value); };
+            document.getElementById('filterGroupBy').onchange = function() { setFilter('groupBy', this.value); };
 
             const board = document.createElement('div');
             board.className = 'board';
@@ -639,11 +656,7 @@ export const KANBAN_TEMPLATE = `<!DOCTYPE html>
                 colEl.className = 'column column-' + col.id;
                 const tasks = getFilteredTasks().filter(t => t.status === col.status);
                 let colHtml = '<div class="column-header"><span class="column-title">' + esc(col.title) + '</span><span class="column-count">' + tasks.length + '</span></div><div class="column-cards">';
-                if (tasks.length) {
-                    tasks.forEach(task => { colHtml += renderCard(task); });
-                } else {
-                    colHtml += '<div class="empty">No tasks</div>';
-                }
+                colHtml += renderGroupedCards(tasks, filters.groupBy);
                 colHtml += '</div>';
                 colEl.innerHTML = colHtml;
                 board.appendChild(colEl);
@@ -702,6 +715,53 @@ export const KANBAN_TEMPLATE = `<!DOCTYPE html>
             if (filters.priority) tasks = tasks.filter(t => t.epic_priority === filters.priority);
             if (filters.type) tasks = tasks.filter(t => t.task_type === filters.type);
             return tasks;
+        }
+
+        function renderGroupedCards(tasks, groupBy) {
+            if (groupBy === 'none' || !tasks.length) {
+                let html = '';
+                tasks.forEach(task => { html += renderCard(task); });
+                return html || '<div class="empty">No tasks</div>';
+            }
+
+            // Group tasks
+            const groups = {};
+            const orphanKey = groupBy === 'epic' ? '(No Epic)' : '(No Story)';
+
+            tasks.forEach(task => {
+                let key, title;
+                if (groupBy === 'epic') {
+                    key = task.epic_id || orphanKey;
+                    title = task.epic_title || orphanKey;
+                } else {
+                    key = task.story_id || orphanKey;
+                    title = task.story_title || orphanKey;
+                }
+                if (!groups[key]) groups[key] = { title, tasks: [], isOrphan: !task[groupBy + '_id'] };
+                groups[key].tasks.push(task);
+            });
+
+            // Sort: alphabetical, orphans last
+            const sortedKeys = Object.keys(groups).sort((a, b) => {
+                if (groups[a].isOrphan) return 1;
+                if (groups[b].isOrphan) return -1;
+                return groups[a].title.localeCompare(groups[b].title);
+            });
+
+            let html = '';
+            sortedKeys.forEach(key => {
+                const group = groups[key];
+                const completion = groupBy === 'epic'
+                    ? getEpicCompletion(key === orphanKey ? null : key)
+                    : getStoryCompletion(key === orphanKey ? null : key);
+
+                html += '<div class="group-header"><span class="group-name">' + esc(group.title);
+                if (completion) html += ' <span class="card-completion">' + completion.done + '/' + completion.total + '</span>';
+                html += '</span></div>';
+                group.tasks.forEach(task => { html += renderCard(task); });
+            });
+
+            return html || '<div class="empty">No tasks</div>';
         }
 
         function setFilter(key, val) { filters[key] = val; render(); }

@@ -28,7 +28,7 @@ describe("Kanban Template", () => {
     });
 
     it("should initialize filters object with story property", () => {
-      expect(KANBAN_TEMPLATE).toContain("let filters = { epic: '', priority: '', type: '', story: '' }");
+      expect(KANBAN_TEMPLATE).toContain("let filters = { epic: '', priority: '', type: '', story: '', groupBy: 'none' }");
     });
 
     it("should populate story filter from data.stories", () => {
@@ -47,6 +47,73 @@ describe("Kanban Template", () => {
     it("should filter tasks by story_id in getFilteredTasks", () => {
       // Check that the filtering logic includes story filtering
       expect(KANBAN_TEMPLATE).toMatch(/if \(filters\.story\).*story_id/);
+    });
+  });
+
+  describe("Group By functionality", () => {
+    it("should initialize filters object with groupBy property set to 'none'", () => {
+      expect(KANBAN_TEMPLATE).toContain("let filters = { epic: '', priority: '', type: '', story: '', groupBy: 'none' }");
+    });
+
+    it("should include Group By filter dropdown", () => {
+      expect(KANBAN_TEMPLATE).toContain('id="filterGroupBy"');
+      expect(KANBAN_TEMPLATE).toContain("Group By</span>");
+    });
+
+    it("should include None, Epic, and Story options in Group By dropdown", () => {
+      expect(KANBAN_TEMPLATE).toContain('<option value="none">None</option>');
+      expect(KANBAN_TEMPLATE).toContain('<option value="epic">Epic</option>');
+      expect(KANBAN_TEMPLATE).toContain('<option value="story">Story</option>');
+    });
+
+    it("should set groupBy filter value after rendering", () => {
+      expect(KANBAN_TEMPLATE).toContain("document.getElementById('filterGroupBy').value = filters.groupBy");
+    });
+
+    it("should add change handler for groupBy filter", () => {
+      expect(KANBAN_TEMPLATE).toContain("document.getElementById('filterGroupBy').onchange = function() { setFilter('groupBy', this.value); }");
+    });
+
+    it("should include CSS for group headers", () => {
+      expect(KANBAN_TEMPLATE).toContain(".group-header {");
+      expect(KANBAN_TEMPLATE).toContain(".group-name {");
+    });
+
+    it("should include renderGroupedCards function", () => {
+      expect(KANBAN_TEMPLATE).toContain("function renderGroupedCards(tasks, groupBy)");
+    });
+
+    it("should use renderGroupedCards in column rendering", () => {
+      expect(KANBAN_TEMPLATE).toContain("colHtml += renderGroupedCards(tasks, filters.groupBy)");
+    });
+
+    it("should handle None grouping (flat list)", () => {
+      expect(KANBAN_TEMPLATE).toMatch(/if \(groupBy === 'none'/);
+    });
+
+    it("should group tasks by epic_id when groupBy is epic", () => {
+      expect(KANBAN_TEMPLATE).toMatch(/if \(groupBy === 'epic'\)/);
+      expect(KANBAN_TEMPLATE).toContain("task.epic_id");
+    });
+
+    it("should group tasks by story_id when groupBy is story", () => {
+      expect(KANBAN_TEMPLATE).toContain("task.story_id");
+    });
+
+    it("should show orphan epic group as '(No Epic)'", () => {
+      expect(KANBAN_TEMPLATE).toContain("'(No Epic)'");
+    });
+
+    it("should show orphan story group as '(No Story)'", () => {
+      expect(KANBAN_TEMPLATE).toContain("'(No Story)'");
+    });
+
+    it("should use getEpicCompletion for epic groups", () => {
+      expect(KANBAN_TEMPLATE).toContain("getEpicCompletion");
+    });
+
+    it("should use getStoryCompletion for story groups", () => {
+      expect(KANBAN_TEMPLATE).toContain("getStoryCompletion");
     });
   });
 
