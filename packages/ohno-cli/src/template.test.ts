@@ -28,7 +28,7 @@ describe("Kanban Template", () => {
     });
 
     it("should initialize filters object with story property", () => {
-      expect(KANBAN_TEMPLATE).toContain("let filters = { epic: '', priority: '', type: '', story: '', groupBy: 'none' }");
+      expect(KANBAN_TEMPLATE).toContain("let filters = { epic: '', priority: '', type: '', story: '', groupBy: 'none', viewMode: 'columns' }");
     });
 
     it("should populate story filter from data.stories", () => {
@@ -52,7 +52,7 @@ describe("Kanban Template", () => {
 
   describe("Group By functionality", () => {
     it("should initialize filters object with groupBy property set to 'none'", () => {
-      expect(KANBAN_TEMPLATE).toContain("let filters = { epic: '', priority: '', type: '', story: '', groupBy: 'none' }");
+      expect(KANBAN_TEMPLATE).toContain("let filters = { epic: '', priority: '', type: '', story: '', groupBy: 'none', viewMode: 'columns' }");
     });
 
     it("should include Group By filter dropdown", () => {
@@ -114,6 +114,99 @@ describe("Kanban Template", () => {
 
     it("should use getStoryCompletion for story groups", () => {
       expect(KANBAN_TEMPLATE).toContain("getStoryCompletion");
+    });
+  });
+
+  describe("Hierarchical view functionality", () => {
+    it("should initialize filters object with viewMode property set to 'columns'", () => {
+      expect(KANBAN_TEMPLATE).toContain("let filters = { epic: '', priority: '', type: '', story: '', groupBy: 'none', viewMode: 'columns' }");
+    });
+
+    it("should include View Mode filter dropdown", () => {
+      expect(KANBAN_TEMPLATE).toContain('id="filterViewMode"');
+      expect(KANBAN_TEMPLATE).toContain("View</span>");
+    });
+
+    it("should include Columns and Hierarchy options in View Mode dropdown", () => {
+      expect(KANBAN_TEMPLATE).toContain('<option value="columns">Columns</option>');
+      expect(KANBAN_TEMPLATE).toContain('<option value="hierarchy">Hierarchy</option>');
+    });
+
+    it("should set viewMode filter value after rendering", () => {
+      expect(KANBAN_TEMPLATE).toContain("document.getElementById('filterViewMode').value = filters.viewMode");
+    });
+
+    it("should add change handler for viewMode filter", () => {
+      expect(KANBAN_TEMPLATE).toContain("document.getElementById('filterViewMode').onchange = function() { setFilter('viewMode', this.value); }");
+    });
+
+    it("should include CSS for hierarchy view", () => {
+      expect(KANBAN_TEMPLATE).toContain(".hierarchy-view {");
+      expect(KANBAN_TEMPLATE).toContain(".epic-section");
+      expect(KANBAN_TEMPLATE).toContain(".story-section");
+      expect(KANBAN_TEMPLATE).toContain(".orphan-section");
+    });
+
+    it("should include CSS for collapsible sections", () => {
+      expect(KANBAN_TEMPLATE).toContain(".collapse-icon");
+      expect(KANBAN_TEMPLATE).toContain(".epic-header");
+      expect(KANBAN_TEMPLATE).toContain(".story-header");
+      expect(KANBAN_TEMPLATE).toContain(".collapsed");
+    });
+
+    it("should include CSS for hierarchy task items", () => {
+      expect(KANBAN_TEMPLATE).toContain(".hierarchy-task {");
+      expect(KANBAN_TEMPLATE).toContain(".status-badge");
+      expect(KANBAN_TEMPLATE).toContain(".task-id-link");
+    });
+
+    it("should include CSS for status badges", () => {
+      expect(KANBAN_TEMPLATE).toContain(".status-todo");
+      expect(KANBAN_TEMPLATE).toContain(".status-in_progress");
+      expect(KANBAN_TEMPLATE).toContain(".status-review");
+      expect(KANBAN_TEMPLATE).toContain(".status-done");
+      expect(KANBAN_TEMPLATE).toContain(".status-blocked");
+    });
+
+    it("should include toggleSection function", () => {
+      expect(KANBAN_TEMPLATE).toContain("function toggleSection(sectionId)");
+    });
+
+    it("should expose toggleSection to window object", () => {
+      expect(KANBAN_TEMPLATE).toContain("window.toggleSection = toggleSection");
+    });
+
+    it("should include renderHierarchyView function", () => {
+      expect(KANBAN_TEMPLATE).toContain("function renderHierarchyView(tasks)");
+    });
+
+    it("should include renderHierarchyTask function", () => {
+      expect(KANBAN_TEMPLATE).toContain("function renderHierarchyTask(task)");
+    });
+
+    it("should conditionally render hierarchy view when viewMode is hierarchy", () => {
+      expect(KANBAN_TEMPLATE).toMatch(/if \(filters\.viewMode === 'hierarchy'\)/);
+    });
+
+    it("should render column board when viewMode is not hierarchy", () => {
+      expect(KANBAN_TEMPLATE).toContain("board.className = 'board'");
+    });
+
+    it("should handle orphan tasks in '[No Epic]' section", () => {
+      expect(KANBAN_TEMPLATE).toContain("[No Epic]");
+    });
+
+    it("should include collapse indicators (▼ expanded, ▶ collapsed)", () => {
+      expect(KANBAN_TEMPLATE).toContain("▼");
+      expect(KANBAN_TEMPLATE).toContain("▶");
+    });
+
+    it("should show completion badges on Epic headers", () => {
+      expect(KANBAN_TEMPLATE).toContain(".hierarchy-badge");
+    });
+
+    it("should attach click handlers to hierarchy tasks", () => {
+      expect(KANBAN_TEMPLATE).toMatch(/hierarchyEl.*querySelectorAll.*\.hierarchy-task/);
     });
   });
 

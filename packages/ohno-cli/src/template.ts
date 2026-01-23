@@ -248,6 +248,91 @@ export const KANBAN_TEMPLATE = `<!DOCTYPE html>
         .group-header:first-child { margin-top: 0; }
         .group-name { display: flex; align-items: center; gap: 0.5rem; }
 
+        .hierarchy-view {
+            padding: 1rem 1.5rem;
+            max-width: 900px;
+        }
+
+        .epic-section, .story-section {
+            margin-bottom: 0.5rem;
+        }
+
+        .epic-header, .story-header, .orphan-header {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 0.75rem;
+            background: var(--bg-secondary);
+            border-radius: 6px;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .epic-header:hover, .story-header:hover, .orphan-header:hover {
+            background: var(--bg-card);
+        }
+
+        .collapse-icon {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            width: 1rem;
+        }
+
+        .epic-title { font-weight: 600; font-size: 0.9rem; }
+        .story-title { font-weight: 500; font-size: 0.85rem; color: var(--text-secondary); }
+
+        .hierarchy-badge {
+            margin-left: auto;
+            font-size: 0.7rem;
+            color: var(--text-muted);
+        }
+
+        .epic-content, .story-content, .orphan-content {
+            margin-left: 1.5rem;
+            border-left: 1px solid var(--border);
+            padding-left: 0.75rem;
+        }
+
+        .epic-section.collapsed .epic-content,
+        .story-section.collapsed .story-content,
+        .orphan-section.collapsed .orphan-content {
+            display: none;
+        }
+
+        .hierarchy-task {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.375rem 0.5rem;
+            font-size: 0.8rem;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+
+        .hierarchy-task:hover {
+            background: var(--bg-card);
+        }
+
+        .task-id-link {
+            font-family: monospace;
+            font-size: 0.7rem;
+            color: var(--text-muted);
+        }
+
+        .task-title-text { flex: 1; }
+
+        .status-badge {
+            font-size: 0.65rem;
+            padding: 0.1rem 0.3rem;
+            border-radius: 3px;
+            font-weight: 500;
+        }
+        .status-todo { background: var(--text-muted); color: white; }
+        .status-in_progress { background: var(--blue); color: white; }
+        .status-review { background: var(--purple); color: white; }
+        .status-done { background: var(--green); color: white; }
+        .status-blocked { background: var(--red); color: white; }
+
         .empty { text-align: center; padding: 2rem 1rem; color: var(--text-muted); font-size: 0.8rem; }
 
         .no-data {
@@ -570,7 +655,7 @@ export const KANBAN_TEMPLATE = `<!DOCTYPE html>
 
         let data = window.KANBAN_DATA || {};
         let lastSync = data.synced_at;
-        let filters = { epic: '', priority: '', type: '', story: '', groupBy: 'none' };
+        let filters = { epic: '', priority: '', type: '', story: '', groupBy: 'none', viewMode: 'columns' };
         let currentTaskId = null;
 
         function init() {
@@ -636,6 +721,7 @@ export const KANBAN_TEMPLATE = `<!DOCTYPE html>
             filterHtml += '</select></div><div class="filter-group"><span class="filter-label">Priority</span><select class="filter-select" id="filterPriority"><option value="">All</option><option value="P0">P0</option><option value="P1">P1</option><option value="P2">P2</option></select></div>';
             filterHtml += '<div class="filter-group"><span class="filter-label">Type</span><select class="filter-select" id="filterType"><option value="">All</option><option value="feature">Feature</option><option value="bug">Bug</option><option value="chore">Chore</option><option value="spike">Spike</option><option value="test">Test</option></select></div>';
             filterHtml += '<div class="filter-group"><span class="filter-label">Group By</span><select class="filter-select" id="filterGroupBy"><option value="none">None</option><option value="epic">Epic</option><option value="story">Story</option></select></div>';
+            filterHtml += '<div class="filter-group"><span class="filter-label">View</span><select class="filter-select" id="filterViewMode"><option value="columns">Columns</option><option value="hierarchy">Hierarchy</option></select></div>';
             filtersEl.innerHTML = filterHtml;
             app.appendChild(filtersEl);
             document.getElementById('filterEpic').value = filters.epic;
@@ -643,29 +729,42 @@ export const KANBAN_TEMPLATE = `<!DOCTYPE html>
             document.getElementById('filterPriority').value = filters.priority;
             document.getElementById('filterType').value = filters.type;
             document.getElementById('filterGroupBy').value = filters.groupBy;
+            document.getElementById('filterViewMode').value = filters.viewMode;
             document.getElementById('filterEpic').onchange = function() { setFilter('epic', this.value); };
             document.getElementById('filterStory').onchange = function() { setFilter('story', this.value); };
             document.getElementById('filterPriority').onchange = function() { setFilter('priority', this.value); };
             document.getElementById('filterType').onchange = function() { setFilter('type', this.value); };
             document.getElementById('filterGroupBy').onchange = function() { setFilter('groupBy', this.value); };
+            document.getElementById('filterViewMode').onchange = function() { setFilter('viewMode', this.value); };
 
-            const board = document.createElement('div');
-            board.className = 'board';
-            COLUMNS.forEach(col => {
-                const colEl = document.createElement('div');
-                colEl.className = 'column column-' + col.id;
-                const tasks = getFilteredTasks().filter(t => t.status === col.status);
-                let colHtml = '<div class="column-header"><span class="column-title">' + esc(col.title) + '</span><span class="column-count">' + tasks.length + '</span></div><div class="column-cards">';
-                colHtml += renderGroupedCards(tasks, filters.groupBy);
-                colHtml += '</div>';
-                colEl.innerHTML = colHtml;
-                board.appendChild(colEl);
-            });
-            app.appendChild(board);
+            if (filters.viewMode === 'hierarchy') {
+                const hierarchyEl = document.createElement('div');
+                hierarchyEl.innerHTML = renderHierarchyView(getFilteredTasks());
+                app.appendChild(hierarchyEl);
 
-            board.querySelectorAll('.card').forEach(card => {
-                card.onclick = function() { openDetail(this.dataset.id); };
-            });
+                // Attach click handlers for task detail
+                hierarchyEl.querySelectorAll('.hierarchy-task').forEach(el => {
+                    el.onclick = function() { openDetail(this.dataset.id); };
+                });
+            } else {
+                const board = document.createElement('div');
+                board.className = 'board';
+                COLUMNS.forEach(col => {
+                    const colEl = document.createElement('div');
+                    colEl.className = 'column column-' + col.id;
+                    const tasks = getFilteredTasks().filter(t => t.status === col.status);
+                    let colHtml = '<div class="column-header"><span class="column-title">' + esc(col.title) + '</span><span class="column-count">' + tasks.length + '</span></div><div class="column-cards">';
+                    colHtml += renderGroupedCards(tasks, filters.groupBy);
+                    colHtml += '</div>';
+                    colEl.innerHTML = colHtml;
+                    board.appendChild(colEl);
+                });
+                app.appendChild(board);
+
+                board.querySelectorAll('.card').forEach(card => {
+                    card.onclick = function() { openDetail(this.dataset.id); };
+                });
+            }
         }
 
         function renderCard(task) {
@@ -764,7 +863,128 @@ export const KANBAN_TEMPLATE = `<!DOCTYPE html>
             return html || '<div class="empty">No tasks</div>';
         }
 
+        function renderHierarchyView(tasks) {
+            if (!tasks.length) return '<div class="hierarchy-view"><div class="empty">No tasks match filters</div></div>';
+
+            // Build hierarchy: Epic > Story > Task
+            const epics = {};
+            const orphanTasks = [];
+
+            tasks.forEach(task => {
+                if (!task.epic_id) {
+                    orphanTasks.push(task);
+                    return;
+                }
+
+                if (!epics[task.epic_id]) {
+                    epics[task.epic_id] = {
+                        id: task.epic_id,
+                        title: task.epic_title,
+                        priority: task.epic_priority,
+                        stories: {}
+                    };
+                }
+
+                const storyKey = task.story_id || '_direct';
+                if (!epics[task.epic_id].stories[storyKey]) {
+                    epics[task.epic_id].stories[storyKey] = {
+                        id: task.story_id,
+                        title: task.story_title || '(Direct tasks)',
+                        tasks: []
+                    };
+                }
+                epics[task.epic_id].stories[storyKey].tasks.push(task);
+            });
+
+            let html = '<div class="hierarchy-view">';
+
+            // Render epics sorted alphabetically
+            const epicIds = Object.keys(epics).sort((a, b) =>
+                (epics[a].title || '').localeCompare(epics[b].title || '')
+            );
+
+            epicIds.forEach(epicId => {
+                const epic = epics[epicId];
+                const epicComp = getEpicCompletion(epicId);
+
+                html += '<div class="epic-section" data-section-id="epic-' + esc(epicId) + '">';
+                html += '<div class="epic-header" onclick="toggleSection(\\'epic-' + esc(epicId) + '\\')">';
+                html += '<span class="collapse-icon">▼</span>';
+                html += '<span class="epic-title">' + esc(epic.title);
+                if (epic.priority) html += ' <span class="card-priority priority-' + esc(epic.priority) + '">' + esc(epic.priority) + '</span>';
+                html += '</span>';
+                if (epicComp) html += '<span class="hierarchy-badge">' + epicComp.done + '/' + epicComp.total + ' done</span>';
+                html += '</div>';
+                html += '<div class="epic-content">';
+
+                // Render stories sorted alphabetically
+                const storyKeys = Object.keys(epic.stories).sort((a, b) => {
+                    if (a === '_direct') return 1;
+                    if (b === '_direct') return -1;
+                    return (epic.stories[a].title || '').localeCompare(epic.stories[b].title || '');
+                });
+
+                storyKeys.forEach(storyKey => {
+                    const story = epic.stories[storyKey];
+                    const storyComp = story.id ? getStoryCompletion(story.id) : null;
+
+                    html += '<div class="story-section" data-section-id="story-' + esc(story.id || storyKey) + '">';
+                    html += '<div class="story-header" onclick="toggleSection(\\'story-' + esc(story.id || storyKey) + '\\')">';
+                    html += '<span class="collapse-icon">▼</span>';
+                    html += '<span class="story-title">' + esc(story.title) + '</span>';
+                    if (storyComp) html += '<span class="hierarchy-badge">' + storyComp.done + '/' + storyComp.total + ' done</span>';
+                    html += '</div>';
+                    html += '<div class="story-content">';
+
+                    story.tasks.forEach(task => {
+                        html += renderHierarchyTask(task);
+                    });
+
+                    html += '</div></div>';
+                });
+
+                html += '</div></div>';
+            });
+
+            // Render orphan tasks
+            if (orphanTasks.length) {
+                html += '<div class="orphan-section" data-section-id="orphan">';
+                html += '<div class="orphan-header" onclick="toggleSection(\\'orphan\\')">';
+                html += '<span class="collapse-icon">▼</span>';
+                html += '<span class="epic-title">[No Epic]</span>';
+                html += '<span class="hierarchy-badge">' + orphanTasks.filter(t => t.status === 'done').length + '/' + orphanTasks.length + ' done</span>';
+                html += '</div>';
+                html += '<div class="orphan-content">';
+                orphanTasks.forEach(task => {
+                    html += renderHierarchyTask(task);
+                });
+                html += '</div></div>';
+            }
+
+            html += '</div>';
+            return html;
+        }
+
+        function renderHierarchyTask(task) {
+            let html = '<div class="hierarchy-task" data-id="' + esc(task.id) + '">';
+            html += '<span class="task-id-link">' + esc(task.id) + '</span>';
+            html += '<span class="task-title-text">' + esc(task.title) + '</span>';
+            html += '<span class="status-badge status-' + esc(task.status) + '">' + esc(task.status) + '</span>';
+            html += '</div>';
+            return html;
+        }
+
         function setFilter(key, val) { filters[key] = val; render(); }
+
+        function toggleSection(sectionId) {
+            const section = document.querySelector('[data-section-id="' + sectionId + '"]');
+            if (section) {
+                section.classList.toggle('collapsed');
+                const icon = section.querySelector('.collapse-icon');
+                if (icon) icon.textContent = section.classList.contains('collapsed') ? '▶' : '▼';
+            }
+        }
+        window.toggleSection = toggleSection;
 
         function renderNoData() {
             const app = document.getElementById('app');
