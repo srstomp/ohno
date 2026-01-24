@@ -5,10 +5,14 @@
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 import { watch } from "chokidar";
 import { out, colors } from "./output.js";
 import { exportDatabase, generateKanbanHtml } from "./kanban.js";
 import { TaskDatabase, type TaskType } from "@stevestomp/ohno-core";
+
+// Track last data hash to avoid regenerating when nothing changed
+let lastDataHash: string | null = null;
 
 const MIME_TYPES: Record<string, string> = {
   ".html": "text/html",
@@ -214,24 +218,37 @@ export function createHttpServer(ohnoDir: string): http.Server {
 /**
  * Watch database file and regenerate kanban on changes
  *
- * SQLite with WAL mode writes to tasks.db-wal first, then checkpoints to tasks.db.
- * We watch both files to catch changes immediately.
+ * Only watches the main tasks.db file, not the WAL file. This avoids a feedback
+ * loop where reading the database during sync causes WAL checkpoints, which
+ * would trigger another sync.
  */
 export function watchDatabase(ohnoDir: string): void {
   const dbPath = path.join(ohnoDir, "tasks.db");
-  const walPath = `${dbPath}-wal`;
 
-  // Watch both main db and WAL file for SQLite WAL mode compatibility
-  const watcher = watch([dbPath, walPath], {
+  // Only watch main db file - watching WAL causes feedback loops because
+  // opening the db for reading can trigger WAL checkpoints
+  const watcher = watch(dbPath, {
     persistent: true,
     ignoreInitial: true,
+    // Use polling for SQLite files since inotify may miss some changes
+    usePolling: true,
+    interval: 1000,
   });
 
-  // Debounce to avoid multiple regenerations when both files change
+  // Debounce to avoid multiple regenerations
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-  const DEBOUNCE_MS = 100;
+  const DEBOUNCE_MS = 500;
+
+  // Track last sync time to avoid redundant syncs
+  let lastSyncTime = 0;
+  let isSyncing = false;
 
   watcher.on("change", (changedPath) => {
+    // Skip if we're currently syncing (our own write could trigger this)
+    if (isSyncing) {
+      return;
+    }
+
     // Clear existing timer
     if (debounceTimer) {
       clearTimeout(debounceTimer);
@@ -239,8 +256,20 @@ export function watchDatabase(ohnoDir: string): void {
 
     // Set new timer to debounce rapid changes
     debounceTimer = setTimeout(async () => {
-      out.info("Database changed, regenerating kanban...");
-      await syncKanban(ohnoDir);
+      // Check if enough time has passed since last sync
+      const now = Date.now();
+      if (now - lastSyncTime < 1000) {
+        debounceTimer = null;
+        return;
+      }
+
+      isSyncing = true;
+      const didSync = await syncKanban(ohnoDir);
+      if (didSync) {
+        out.info("Database changed, regenerated kanban");
+      }
+      lastSyncTime = Date.now();
+      isSyncing = false;
       debounceTimer = null;
     }, DEBOUNCE_MS);
   });
@@ -259,8 +288,11 @@ export function watchDatabase(ohnoDir: string): void {
 
 /**
  * Sync database to kanban HTML
+ *
+ * Compares data hash to avoid regenerating when nothing actually changed.
+ * Returns true if sync was performed, false if skipped or errored.
  */
-export async function syncKanban(ohnoDir: string): Promise<boolean> {
+export async function syncKanban(ohnoDir: string, force: boolean = false): Promise<boolean> {
   const dbPath = path.join(ohnoDir, "tasks.db");
 
   if (!fs.existsSync(dbPath)) {
@@ -270,10 +302,34 @@ export async function syncKanban(ohnoDir: string): Promise<boolean> {
 
   try {
     const data = await exportDatabase(dbPath);
+
+    // Hash only the actual data (exclude volatile fields like synced_at)
+    const stableData = {
+      projects: data.projects,
+      epics: data.epics,
+      stories: data.stories,
+      tasks: data.tasks,
+      dependencies: data.dependencies,
+      task_activity: data.task_activity,
+      task_files: data.task_files,
+      task_dependencies: data.task_dependencies,
+      stats: data.stats,
+    };
+    const dataHash = crypto
+      .createHash("md5")
+      .update(JSON.stringify(stableData))
+      .digest("hex");
+
+    // Skip if data hasn't changed (unless forced)
+    if (!force && lastDataHash === dataHash) {
+      return false;
+    }
+
     const html = generateKanbanHtml(data);
     const htmlPath = path.join(ohnoDir, "kanban.html");
 
     fs.writeFileSync(htmlPath, html);
+    lastDataHash = dataHash;
     return true;
   } catch (error) {
     out.error("Failed to sync kanban", String(error));
@@ -330,8 +386,8 @@ export async function startServer(options: {
 }): Promise<void> {
   const { port, host, ohnoDir, quiet } = options;
 
-  // Initial sync
-  if (!(await syncKanban(ohnoDir))) {
+  // Initial sync (force to ensure HTML is generated)
+  if (!(await syncKanban(ohnoDir, true))) {
     process.exit(1);
   }
 
