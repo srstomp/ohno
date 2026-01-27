@@ -50,9 +50,6 @@ async function parseJsonBody(req: http.IncomingMessage): Promise<Record<string, 
 function sendJson(res: http.ServerResponse, status: number, data: unknown): void {
   res.writeHead(status, {
     "Content-Type": "application/json",
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, PUT, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
   });
   res.end(JSON.stringify(data));
 }
@@ -68,13 +65,9 @@ async function handleApiRequest(
   const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
   const method = req.method ?? "GET";
 
-  // Handle CORS preflight
+  // Handle OPTIONS request (no CORS needed for local-only server)
   if (method === "OPTIONS") {
-    res.writeHead(204, {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET, PUT, DELETE, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type",
-    });
+    res.writeHead(204);
     res.end();
     return true;
   }
@@ -157,7 +150,9 @@ async function handleApiRequest(
     sendJson(res, 405, { error: "Method not allowed" });
     return true;
   } catch (error) {
-    sendJson(res, 500, { error: String(error) });
+    // Log full error server-side, send generic message to client
+    console.error("API error:", error);
+    sendJson(res, 500, { error: "Internal server error" });
     return true;
   }
 }
@@ -175,17 +170,20 @@ export function createHttpServer(ohnoDir: string): http.Server {
       return;
     }
 
-    let filePath = path.join(ohnoDir, url.pathname === "/" ? "kanban.html" : url.pathname);
+    const requestedPath = path.join(ohnoDir, url.pathname === "/" ? "kanban.html" : url.pathname);
 
-    // Security: prevent directory traversal
-    if (!filePath.startsWith(ohnoDir)) {
-      res.writeHead(403);
-      res.end("Forbidden");
-      return;
-    }
-
-    // Check if file exists
-    if (!fs.existsSync(filePath)) {
+    // Security: use canonical path resolution to prevent directory traversal
+    let filePath: string;
+    try {
+      const ohnoRealPath = fs.realpathSync(ohnoDir);
+      filePath = fs.realpathSync(requestedPath);
+      if (!filePath.startsWith(ohnoRealPath + path.sep) && filePath !== ohnoRealPath) {
+        res.writeHead(403);
+        res.end("Forbidden");
+        return;
+      }
+    } catch {
+      // File doesn't exist or can't be resolved
       res.writeHead(404);
       res.end("Not Found");
       return;
