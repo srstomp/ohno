@@ -554,11 +554,6 @@ export const KANBAN_TEMPLATE = `<!DOCTYPE html>
         .detail-blockers { background: rgba(239,68,68,0.1); border: 1px solid var(--red); padding: 0.75rem; border-radius: 6px; color: var(--red); font-size: 0.875rem; line-height: 1.5; }
         .detail-handoff { background: rgba(59,130,246,0.1); border: 1px solid var(--blue); padding: 0.75rem; border-radius: 6px; color: var(--text-primary); font-size: 0.875rem; line-height: 1.5; }
 
-        .detail-progress { display: flex; align-items: center; gap: 0.75rem; }
-        .detail-progress-bar { flex: 1; height: 8px; background: var(--bg-card); border-radius: 4px; overflow: hidden; }
-        .detail-progress-fill { height: 100%; background: var(--green); border-radius: 4px; }
-        .detail-progress-text { font-size: 0.875rem; font-weight: 600; min-width: 40px; text-align: right; }
-
         .detail-meta { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.75rem; }
         .meta-item { background: var(--bg-card); padding: 0.625rem; border-radius: 4px; }
         .meta-label { font-size: 0.65rem; color: var(--text-muted); text-transform: uppercase; margin-bottom: 0.25rem; }
@@ -1057,9 +1052,6 @@ export const KANBAN_TEMPLATE = `<!DOCTYPE html>
             if (task.task_type) html += '<span class="detail-badge" style="background:var(--bg-card)">' + esc(task.task_type) + '</span>';
             html += '</div><div class="detail-actions"><button class="btn btn-edit" onclick="openEditModal(\\'' + esc(task.id) + '\\')">Edit</button><button class="btn btn-delete" onclick="openDeleteModal(\\'' + esc(task.id) + '\\')">Delete</button></div></div><button class="detail-close" id="closeBtn">&times;</button></div>';
 
-            if (task.progress_percent != null) {
-                html += '<div class="detail-section"><div class="detail-section-title">Progress</div><div class="detail-progress"><div class="detail-progress-bar"><div class="detail-progress-fill" style="width:' + (task.progress_percent||0) + '%"></div></div><span class="detail-progress-text">' + (task.progress_percent||0) + '%</span></div></div>';
-            }
             if (task.blockers) html += '<div class="detail-section"><div class="detail-section-title">Blockers</div><div class="detail-blockers">' + esc(task.blockers) + '</div></div>';
             if (task.description) html += '<div class="detail-section"><div class="detail-section-title">Description</div><div class="detail-description">' + esc(task.description) + '</div></div>';
             if (task.context_summary) html += '<div class="detail-section"><div class="detail-section-title">Context</div><div class="detail-context">' + esc(task.context_summary) + '</div></div>';
