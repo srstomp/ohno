@@ -1,7 +1,16 @@
 /**
  * Kanban HTML template
  * Self-contained HTML with embedded styles and JavaScript
- * Note: Data comes from local SQLite (trusted source) and esc() function escapes HTML
+ *
+ * SECURITY NOTE (innerHTML usage):
+ * This template uses innerHTML for rendering, which is safe in this context because:
+ * 1. All data comes from the local SQLite database (trusted source, not user input from the web)
+ * 2. The esc() function escapes HTML special characters (&, <, >, ") in all dynamic content
+ * 3. The kanban server runs locally and is not exposed to external/untrusted users
+ * 4. No data is rendered without going through esc() first
+ *
+ * If this code is ever modified to accept untrusted input (e.g., from external APIs),
+ * consider switching to DOM methods (createElement/appendChild) or a sanitizer like DOMPurify.
  */
 
 export const KANBAN_TEMPLATE = `<!DOCTYPE html>
