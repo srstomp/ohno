@@ -323,4 +323,71 @@ describe("Kanban Template", () => {
       expect(KANBAN_TEMPLATE).toContain("location.reload()");
     });
   });
+
+  describe("generateKanbanHtml special character handling (Issue #12)", () => {
+    it("should handle $' pattern in task content without breaking HTML", async () => {
+      const { generateKanbanHtml } = await import("./kanban.js");
+
+      // Data containing $' which is a special replacement pattern in String.replace()
+      const data = {
+        synced_at: new Date().toISOString(),
+        projects: [],
+        epics: [],
+        stories: [],
+        tasks: [{
+          id: "test-1",
+          title: "Test regex pattern",
+          description: "RegExp(r'^(\\d)\\1+$').hasMatch(pin)",
+          status: "todo",
+        }],
+        task_activity: [],
+        task_files: [],
+        task_dependencies: [],
+        stats: { total_tasks: 1, done_tasks: 0, in_progress_tasks: 0, review_tasks: 0, blocked_tasks: 0, completion_percent: 0 },
+      };
+
+      const html = generateKanbanHtml(data as any);
+
+      // HTML should be valid - script tag should close properly
+      expect(html).toContain("</script>");
+      expect(html).toContain("</html>");
+
+      // The $' pattern should be preserved in the JSON data
+      expect(html).toContain("$').hasMatch(pin)");
+
+      // Script tag should not be prematurely closed
+      const scriptStart = html.indexOf("<script>window.KANBAN_DATA");
+      const scriptEnd = html.indexOf("</script>", scriptStart);
+      const scriptContent = html.slice(scriptStart, scriptEnd);
+      expect(scriptContent).toContain("$').hasMatch(pin)");
+    });
+
+    it("should handle other special replacement patterns ($&, $`, $$)", async () => {
+      const { generateKanbanHtml } = await import("./kanban.js");
+
+      const data = {
+        synced_at: new Date().toISOString(),
+        projects: [],
+        epics: [],
+        stories: [],
+        tasks: [{
+          id: "test-1",
+          title: "Special patterns: $& $` $$",
+          description: "Test $& and $` and $$ patterns",
+          status: "todo",
+        }],
+        task_activity: [],
+        task_files: [],
+        task_dependencies: [],
+        stats: { total_tasks: 1, done_tasks: 0, in_progress_tasks: 0, review_tasks: 0, blocked_tasks: 0, completion_percent: 0 },
+      };
+
+      const html = generateKanbanHtml(data as any);
+
+      // All special patterns should be preserved literally
+      expect(html).toContain("$&");
+      expect(html).toContain("$`");
+      expect(html).toContain("$$");
+    });
+  });
 });

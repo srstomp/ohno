@@ -189,5 +189,7 @@ export async function exportDatabase(dbPath: string): Promise<KanbanData> {
  */
 export function generateKanbanHtml(data: KanbanData): string {
   const jsonData = JSON.stringify(data);
-  return KANBAN_TEMPLATE.replace("{{KANBAN_DATA}}", jsonData);
+  // Use function replacement to avoid special pattern interpretation ($', $&, etc.)
+  // See: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/replace#specifying_a_string_as_the_replacement
+  return KANBAN_TEMPLATE.replace("{{KANBAN_DATA}}", () => jsonData);
 }
