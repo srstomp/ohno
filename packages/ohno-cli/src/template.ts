@@ -685,7 +685,28 @@ export const KANBAN_TEMPLATE = `<!DOCTYPE html>
                 const r = await fetch('kanban.html?_=' + Date.now());
                 const t = await r.text();
                 const m = t.match(/"synced_at":\\s*"([^"]+)"/);
-                if (m && m[1] !== lastSync) location.reload();
+                if (m && m[1] !== lastSync) {
+                    // Extract new data without full page reload to preserve UI state
+                    const dataMatch = t.match(/window\\.KANBAN_DATA\\s*=\\s*(\\{[\\s\\S]*?\\});\\s*<\\/script>/);
+                    if (dataMatch) {
+                        try {
+                            const newData = JSON.parse(dataMatch[1]);
+                            data = newData;
+                            lastSync = data.synced_at;
+                            render();
+                            // Re-render detail panel if open with updated task data
+                            if (currentTaskId) {
+                                const task = (data.tasks||[]).find(t => t.id === currentTaskId);
+                                if (task) renderDetailPanel(task);
+                            }
+                        } catch(parseErr) {
+                            // Fall back to reload if parsing fails
+                            location.reload();
+                        }
+                    } else {
+                        location.reload();
+                    }
+                }
             } catch(e) {}
         }
 
