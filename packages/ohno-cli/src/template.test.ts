@@ -293,4 +293,34 @@ describe("Kanban Template", () => {
       expect(KANBAN_TEMPLATE).toContain("function getFilteredTasks()");
     });
   });
+
+  describe("State preservation on data updates (Issue #23)", () => {
+    it("should extract and parse new data from fetched HTML instead of reloading", () => {
+      // checkUpdates should extract KANBAN_DATA from HTML response via regex
+      expect(KANBAN_TEMPLATE).toContain("window\\.KANBAN_DATA");
+      expect(KANBAN_TEMPLATE).toContain("JSON.parse(dataMatch[1])");
+    });
+
+    it("should update data object in place without location.reload()", () => {
+      // Should assign new data to local variable instead of always reloading
+      expect(KANBAN_TEMPLATE).toContain("data = newData");
+      expect(KANBAN_TEMPLATE).toContain("lastSync = data.synced_at");
+    });
+
+    it("should re-render the board after data update", () => {
+      // Should call render() after updating data
+      expect(KANBAN_TEMPLATE).toMatch(/data = newData[\s\S]*?render\(\)/);
+    });
+
+    it("should re-render detail panel if open after data update", () => {
+      // Should check currentTaskId and re-render detail panel with updated data
+      expect(KANBAN_TEMPLATE).toMatch(/if \(currentTaskId\)[\s\S]*?renderDetailPanel\(task\)/);
+    });
+
+    it("should fall back to location.reload() only on parse errors", () => {
+      // Parse errors should still trigger reload as fallback
+      expect(KANBAN_TEMPLATE).toContain("} catch(parseErr) {");
+      expect(KANBAN_TEMPLATE).toContain("location.reload()");
+    });
+  });
 });
