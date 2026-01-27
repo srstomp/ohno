@@ -252,6 +252,7 @@ export function createCli(): Command {
     .option("-t, --type <type>", "Task type (feature, bug, chore, spike, test)", "feature")
     .option("--description <desc>", "Task description")
     .option("-e, --estimate <hours>", "Estimated hours")
+    .option("-s, --story <id>", "Story ID to link task to")
     .action(async (title, options, command) => {
       const globalOpts = command.parent?.opts() ?? {};
       const db = await getDb(globalOpts.dir);
@@ -261,6 +262,7 @@ export function createCli(): Command {
         task_type: options.type,
         description: options.description,
         estimate_hours: options.estimate ? parseFloat(options.estimate) : undefined,
+        story_id: options.story,
       });
       db.close();
 
