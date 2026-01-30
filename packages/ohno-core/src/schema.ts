@@ -64,7 +64,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   created_at TEXT,
   updated_at TEXT,
   created_by TEXT,
-  activity_summary TEXT
+  activity_summary TEXT,
+  source TEXT DEFAULT 'human'
 )`;
 
 /**
@@ -82,6 +83,7 @@ export const EXTENDED_TASK_COLUMNS: [string, string][] = [
   ["updated_at", "TEXT"],
   ["created_by", "TEXT"],
   ["activity_summary", "TEXT"],
+  ["source", "TEXT DEFAULT 'human'"],
 ];
 
 /**

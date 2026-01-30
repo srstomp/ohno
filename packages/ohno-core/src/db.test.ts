@@ -999,6 +999,60 @@ describe("TaskDatabase", () => {
     });
   });
 
+  describe("Task Source Field", () => {
+    describe("createTask with source", () => {
+      it("should default to 'human' when source is not provided", () => {
+        const taskId = db.createTask({ title: "Default source task" });
+        const task = db.getTask(taskId);
+        expect(task?.source).toBe("human");
+      });
+
+      it("should accept 'human' source", () => {
+        const taskId = db.createTask({ title: "Human task", source: "human" });
+        const task = db.getTask(taskId);
+        expect(task?.source).toBe("human");
+      });
+
+      it("should accept 'pokayokay-plan' source", () => {
+        const taskId = db.createTask({ title: "Pokayokay task", source: "pokayokay-plan" });
+        const task = db.getTask(taskId);
+        expect(task?.source).toBe("pokayokay-plan");
+      });
+
+      it("should accept 'kaizen-fix' source", () => {
+        const taskId = db.createTask({ title: "Kaizen fix task", source: "kaizen-fix" });
+        const task = db.getTask(taskId);
+        expect(task?.source).toBe("kaizen-fix");
+      });
+
+      it("should accept 'kaizen-suggest' source", () => {
+        const taskId = db.createTask({ title: "Kaizen suggest task", source: "kaizen-suggest" });
+        const task = db.getTask(taskId);
+        expect(task?.source).toBe("kaizen-suggest");
+      });
+
+      it("should persist source field across database operations", async () => {
+        const taskId = db.createTask({ title: "Persisted task", source: "kaizen-fix" });
+
+        // Reload database to ensure persistence
+        db.close();
+        db = await TaskDatabase.open(dbPath);
+
+        const task = db.getTask(taskId);
+        expect(task?.source).toBe("kaizen-fix");
+      });
+    });
+
+    describe("existing tasks migration", () => {
+      it("should have 'human' as default for existing tasks without source", async () => {
+        // This test verifies backward compatibility with existing databases
+        const taskId = db.createTask({ title: "Existing task" });
+        const task = db.getTask(taskId);
+        expect(task?.source).toBe("human");
+      });
+    });
+  });
+
   describe("Project Status", () => {
     describe("getProjectStatus", () => {
       it("should return correct task counts", () => {

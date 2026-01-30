@@ -771,6 +771,54 @@ describe("MCP Server", () => {
         expect(task?.task_type).toBe("bug");
         expect(task?.estimate_hours).toBe(4);
       });
+
+      it("should default to 'human' source when not provided", async () => {
+        const result = await handleTool("create_task", {
+          title: "Task without source",
+        }) as { success: boolean; task_id: string };
+
+        const task = db.getTask(result.task_id);
+        expect(task?.source).toBe("human");
+      });
+
+      it("should accept 'pokayokay-plan' source", async () => {
+        const result = await handleTool("create_task", {
+          title: "Pokayokay task",
+          source: "pokayokay-plan",
+        }) as { success: boolean; task_id: string };
+
+        const task = db.getTask(result.task_id);
+        expect(task?.source).toBe("pokayokay-plan");
+      });
+
+      it("should accept 'kaizen-fix' source", async () => {
+        const result = await handleTool("create_task", {
+          title: "Kaizen fix task",
+          source: "kaizen-fix",
+        }) as { success: boolean; task_id: string };
+
+        const task = db.getTask(result.task_id);
+        expect(task?.source).toBe("kaizen-fix");
+      });
+
+      it("should accept 'kaizen-suggest' source", async () => {
+        const result = await handleTool("create_task", {
+          title: "Kaizen suggest task",
+          source: "kaizen-suggest",
+        }) as { success: boolean; task_id: string };
+
+        const task = db.getTask(result.task_id);
+        expect(task?.source).toBe("kaizen-suggest");
+      });
+
+      it("should reject invalid source", async () => {
+        await expect(
+          handleTool("create_task", {
+            title: "Invalid source task",
+            source: "invalid-source",
+          })
+        ).rejects.toThrow(ZodError);
+      });
     });
 
     describe("create_story", () => {

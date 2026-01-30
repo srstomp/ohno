@@ -36,6 +36,7 @@ const CreateTaskSchema = z.object({
   task_type: z.enum(["feature", "bug", "chore", "spike", "test"]).default("feature"),
   description: z.string().optional(),
   estimate_hours: z.number().optional(),
+  source: z.enum(["human", "pokayokay-plan", "kaizen-fix", "kaizen-suggest"]).optional(),
 });
 
 const CreateStorySchema = z.object({
@@ -276,6 +277,7 @@ const TOOLS = [
         task_type: { type: "string", enum: ["feature", "bug", "chore", "spike", "test"], description: "Task type", default: "feature" },
         description: { type: "string", description: "Task description" },
         estimate_hours: { type: "number", description: "Estimated hours" },
+        source: { type: "string", enum: ["human", "pokayokay-plan", "kaizen-fix", "kaizen-suggest"], description: "Source of the task (defaults to 'human')" },
       },
       required: ["title"],
     },

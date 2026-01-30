@@ -11,6 +11,9 @@ export type TaskType = "feature" | "bug" | "chore" | "spike" | "test";
 // Priority enum
 export type Priority = "P0" | "P1" | "P2" | "P3";
 
+// Task source enum
+export type TaskSource = "human" | "pokayokay-plan" | "kaizen-fix" | "kaizen-suggest";
+
 // Activity type enum
 export type ActivityType = "status_change" | "note" | "file_change" | "decision" | "progress" | "created" | "updated" | "blocker_set" | "blocker_resolved";
 
@@ -38,6 +41,7 @@ export interface Task {
   updated_at?: string;
   created_by?: string;
   activity_summary?: string;
+  source?: TaskSource;
   // Joined fields from relationships
   story_title?: string;
   story_status?: TaskStatus;
@@ -115,6 +119,7 @@ export interface CreateTaskOptions {
   description?: string;
   estimate_hours?: number;
   actor?: string;
+  source?: TaskSource;
 }
 
 /**
