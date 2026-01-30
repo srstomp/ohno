@@ -411,6 +411,108 @@ describe("CLI Commands", () => {
       expect(task?.task_type).toBe("bug");
       expect(task?.estimate_hours).toBe(4);
     });
+
+    it("should default source to human when not specified", async () => {
+      const program = createCli();
+      program.exitOverride();
+
+      await program.parseAsync([
+        "node",
+        "test",
+        "--json",
+        "-d",
+        tempDir,
+        "create",
+        "New task",
+      ]);
+
+      const output = getConsoleOutput(consoleLogSpy);
+      const parsed = JSON.parse(output);
+      expect(parsed.success).toBe(true);
+
+      // Reload to see changes made by CLI
+      await db.reload();
+      const task = db.getTask(parsed.task_id);
+      expect(task?.source).toBe("human");
+    });
+
+    it("should set source when --source flag is provided", async () => {
+      const program = createCli();
+      program.exitOverride();
+
+      await program.parseAsync([
+        "node",
+        "test",
+        "--json",
+        "-d",
+        tempDir,
+        "create",
+        "Fix from kaizen",
+        "--source",
+        "kaizen-fix",
+      ]);
+
+      const output = getConsoleOutput(consoleLogSpy);
+      const parsed = JSON.parse(output);
+      expect(parsed.success).toBe(true);
+
+      // Reload to see changes made by CLI
+      await db.reload();
+      const task = db.getTask(parsed.task_id);
+      expect(task?.source).toBe("kaizen-fix");
+    });
+
+    it("should accept all valid source types", async () => {
+      const sources = ["human", "pokayokay-plan", "kaizen-fix", "kaizen-suggest"];
+
+      for (const source of sources) {
+        const program = createCli();
+        program.exitOverride();
+
+        await program.parseAsync([
+          "node",
+          "test",
+          "--json",
+          "-d",
+          tempDir,
+          "create",
+          `Task from ${source}`,
+          "--source",
+          source,
+        ]);
+
+        const output = getConsoleOutput(consoleLogSpy);
+        const parsed = JSON.parse(output);
+        expect(parsed.success).toBe(true);
+
+        // Reload to see changes made by CLI
+        await db.reload();
+        const task = db.getTask(parsed.task_id);
+        expect(task?.source).toBe(source);
+
+        // Clear the spy for the next iteration
+        consoleLogSpy.mockClear();
+      }
+    });
+
+    it("should reject invalid source types", async () => {
+      const program = createCli();
+      program.exitOverride();
+
+      await expect(
+        program.parseAsync([
+          "node",
+          "test",
+          "--json",
+          "-d",
+          tempDir,
+          "create",
+          "Task with invalid source",
+          "--source",
+          "invalid-source",
+        ])
+      ).rejects.toThrow();
+    });
   });
 
   describe("start command", () => {

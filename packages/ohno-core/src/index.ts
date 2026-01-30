@@ -18,6 +18,7 @@ export type {
   GetStoriesOptions,
   TaskStatus,
   TaskType,
+  TaskSource,
   Priority,
   ActivityType,
   DependencyType,
