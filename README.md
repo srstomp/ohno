@@ -254,12 +254,15 @@ The `source` parameter on `create_task` tracks task origin:
 | `kaizen-suggest` | Created by kaizen suggestion system |
 
 **Example:**
-```typescript
-// MCP tool call
-create_task("Fix memory leak in worker pool", story_id, "kaizen-fix", ...)
+```bash
+# CLI with --source flag
+ohno create "Fix memory leak" --source kaizen-fix
 
-// Defaults to "human" if not specified
-create_task("Add user authentication", story_id)
+# MCP tool call (uses named parameters)
+# create_task({ title: "Fix bug", source: "kaizen-fix" })
+
+# Defaults to "human" if source not specified
+ohno create "Add authentication"
 ```
 
 This enables filtering and analytics on how tasks enter the system, particularly useful for tracking AI-generated work.
