@@ -518,8 +518,8 @@ export class TaskDatabase {
     }
 
     const sql = `
-      INSERT INTO tasks (id, story_id, title, status, task_type, description, estimate_hours, created_at, updated_at, created_by)
-      VALUES (?, ?, ?, 'todo', ?, ?, ?, ?, ?, ?)
+      INSERT INTO tasks (id, story_id, title, status, task_type, description, estimate_hours, created_at, updated_at, created_by, source)
+      VALUES (?, ?, ?, 'todo', ?, ?, ?, ?, ?, ?, ?)
     `;
 
     this.db.run(sql, [
@@ -532,6 +532,7 @@ export class TaskDatabase {
       timestamp,
       timestamp,
       opts.actor ?? null,
+      opts.source ?? "human",
     ]);
 
     // Log activity
