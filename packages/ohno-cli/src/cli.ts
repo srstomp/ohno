@@ -10,6 +10,7 @@ import {
   findOhnoDir,
   ensureOhnoDir,
   type TaskStatus,
+  type TaskSource,
 } from "@stevestomp/ohno-core";
 import { out, formatTask, formatEpic, formatStory, formatStatus, formatPriority, colors } from "./output.js";
 import { startServer, syncKanban } from "./server.js";
@@ -253,9 +254,21 @@ export function createCli(): Command {
     .option("--description <desc>", "Task description")
     .option("-e, --estimate <hours>", "Estimated hours")
     .option("-s, --story <id>", "Story ID to link task to")
+    .option("--source <source>", "Task source (human, pokayokay-plan, kaizen-fix, kaizen-suggest)", "human")
     .action(async (title, options, command) => {
       const globalOpts = command.parent?.opts() ?? {};
       const db = await getDb(globalOpts.dir);
+
+      // Validate source
+      const validSources: TaskSource[] = ["human", "pokayokay-plan", "kaizen-fix", "kaizen-suggest"];
+      if (options.source && !validSources.includes(options.source as TaskSource)) {
+        out.error(
+          "Invalid source",
+          `Source must be one of: ${validSources.join(", ")}`,
+          `Got: ${options.source}`
+        );
+        process.exit(1);
+      }
 
       const taskId = db.createTask({
         title,
@@ -263,6 +276,7 @@ export function createCli(): Command {
         description: options.description,
         estimate_hours: options.estimate ? parseFloat(options.estimate) : undefined,
         story_id: options.story,
+        source: options.source,
       });
       db.close();
 
