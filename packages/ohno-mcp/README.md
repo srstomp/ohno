@@ -73,7 +73,7 @@ Using `"minimal"` reduces response size by ~75% compared to `"full"`.
 ### CRUD Tools
 | Tool | Description |
 |------|-------------|
-| `create_task` | Create new task, optionally under a story |
+| `create_task` | Create new task. Accepts `source` param: `"human"` (default), `"pokayokay-plan"`, `"kaizen-fix"`, `"kaizen-suggest"` |
 | `update_task` | Modify task details |
 | `archive_task` | Archive task (soft delete) |
 
