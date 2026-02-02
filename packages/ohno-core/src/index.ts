@@ -28,6 +28,7 @@ export type {
   Story,
   StoryStatus,
   UpdateStoryOptions,
+  FieldSet,
 } from "./types.js";
 
 export { toDict } from "./types.js";
@@ -53,4 +54,5 @@ export {
   CREATE_TASK_DEPENDENCIES_TABLE,
   CREATE_INDEXES,
   EXTENDED_TASK_COLUMNS,
+  FIELD_SETS,
 } from "./schema.js";
