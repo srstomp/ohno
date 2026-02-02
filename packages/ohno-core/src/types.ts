@@ -20,6 +20,9 @@ export type ActivityType = "status_change" | "note" | "file_change" | "decision"
 // Dependency type enum
 export type DependencyType = "blocks" | "requires" | "relates_to";
 
+// Field set for get_tasks response size control
+export type FieldSet = "minimal" | "standard" | "full";
+
 /**
  * Core task record
  */
@@ -214,6 +217,7 @@ export interface GetTasksOptions {
   story_status?: TaskStatus;
   epic_status?: TaskStatus;
   limit?: number;
+  fields?: FieldSet;
 }
 
 /**

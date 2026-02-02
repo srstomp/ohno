@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import type { Story, StoryStatus, GetStoriesOptions } from "./types.js";
+import type { Story, StoryStatus, GetStoriesOptions, FieldSet } from "./types.js";
 
 describe("Story Types", () => {
   describe("StoryStatus", () => {
@@ -153,5 +153,16 @@ describe("Story Types", () => {
       expect(options.limit).toBe(5);
       expect(options.offset).toBe(0);
     });
+  });
+});
+
+describe("FieldSet type", () => {
+  it("should accept valid field set values", () => {
+    const minimal: FieldSet = "minimal";
+    const standard: FieldSet = "standard";
+    const full: FieldSet = "full";
+    expect(minimal).toBe("minimal");
+    expect(standard).toBe("standard");
+    expect(full).toBe("full");
   });
 });
