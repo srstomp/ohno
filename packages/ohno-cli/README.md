@@ -45,7 +45,8 @@ ohno sync               # One-time HTML generation
 ohno tasks                      # List all tasks
 ohno tasks -s todo              # Filter by status
 ohno task <id>                  # Get task details
-ohno create "Title"             # Create task
+ohno create "Title"             # Create task (source: human)
+ohno create "Fix bug" --source kaizen-fix  # Create with source tracking
 ohno start <id>                 # Start working (→ in_progress)
 ohno done <id>                  # Mark complete (→ done)
 ohno review <id>                # Mark for review
@@ -79,6 +80,10 @@ ohno next --json       # Get next recommended task
 All commands support:
 - `--json` - Machine-readable JSON output
 - `-d, --dir <path>` - Specify project directory
+
+Create command options:
+- `--source <value>` - Track task origin (human, pokayokay-plan, kaizen-fix, kaizen-suggest)
+- `--story <id>` - Associate task with a story
 
 ## License
 

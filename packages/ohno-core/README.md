@@ -45,8 +45,11 @@ db.updateTaskStatus(taskId, 'in_progress');
 // Get task
 const task = db.getTask(taskId);
 
-// List tasks
+// List tasks (minimal fields by default)
 const tasks = db.getTasks({ status: 'todo', limit: 10 });
+
+// Get full task details
+const fullTasks = db.getTasks({ status: 'todo', fields: 'full' });
 
 // Get session context (for AI agents)
 const context = db.getSessionContext();
@@ -70,7 +73,7 @@ getStory(storyId: string): Story | null
 // Task operations
 createTask(options: CreateTaskOptions): string
 getTask(taskId: string): Task | null
-getTasks(options?: GetTasksOptions): Task[]
+getTasks(options?: GetTasksOptions): Task[]  // options.fields: 'minimal' | 'standard' | 'full'
 updateTask(taskId: string, updates: Partial<Task>): void
 updateTaskStatus(taskId: string, status: TaskStatus, notes?: string): void
 archiveTask(taskId: string, reason?: string): void
@@ -108,6 +111,7 @@ async reload(): Promise<void>
 type TaskStatus = 'todo' | 'in_progress' | 'review' | 'done' | 'blocked' | 'archived';
 type TaskType = 'feature' | 'bug' | 'chore' | 'spike' | 'test';
 type DependencyType = 'blocks' | 'requires' | 'relates_to';
+type FieldSet = 'minimal' | 'standard' | 'full';  // For getTasks field selection
 ```
 
 ## Utilities
