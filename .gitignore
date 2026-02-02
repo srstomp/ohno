@@ -8,6 +8,7 @@
 # Claude Code workflow
 .claude/
 .ohno/
+.worktrees/
 
 # Python
 __pycache__/

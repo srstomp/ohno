@@ -47,12 +47,12 @@ import {
   CREATE_TASK_DEPENDENCIES_TABLE,
   CREATE_INDEXES,
   EXTENDED_TASK_COLUMNS,
-  GET_TASKS_WITH_JOINS,
   GET_TASK_BY_ID,
   GET_PROJECT_STATUS,
   GET_RECENT_ACTIVITY,
   GET_TASK_DEPENDENCIES,
   GET_BLOCKING_DEPENDENCIES,
+  FIELD_SETS,
 } from "./schema.js";
 
 // Cache the SQL.js initialization promise
@@ -242,9 +242,16 @@ export class TaskDatabase {
    * Get tasks with optional filtering
    */
   getTasks(opts: GetTasksOptions = {}): Task[] {
-    const { status, epic_id, priority, story_status, epic_status, limit = 50 } = opts;
+    const { status, epic_id, priority, story_status, epic_status, limit = 50, fields = "minimal" } = opts;
 
-    let sql = GET_TASKS_WITH_JOINS;
+    // Build SELECT clause based on fields parameter
+    const fieldSet = FIELD_SETS[fields] || FIELD_SETS.minimal;
+    const selectClause = fieldSet.join(", ");
+
+    let sql = `SELECT ${selectClause} FROM tasks t
+    LEFT JOIN stories s ON t.story_id = s.id
+    LEFT JOIN epics e ON s.epic_id = e.id`;
+
     const conditions: string[] = ["t.status != 'archived'"];
     const params: unknown[] = [];
 
@@ -518,8 +525,8 @@ export class TaskDatabase {
     }
 
     const sql = `
-      INSERT INTO tasks (id, story_id, title, status, task_type, description, estimate_hours, created_at, updated_at, created_by)
-      VALUES (?, ?, ?, 'todo', ?, ?, ?, ?, ?, ?)
+      INSERT INTO tasks (id, story_id, title, status, task_type, description, estimate_hours, created_at, updated_at, created_by, source)
+      VALUES (?, ?, ?, 'todo', ?, ?, ?, ?, ?, ?, ?)
     `;
 
     this.db.run(sql, [
@@ -532,6 +539,7 @@ export class TaskDatabase {
       timestamp,
       timestamp,
       opts.actor ?? null,
+      opts.source ?? "human",
     ]);
 
     // Log activity

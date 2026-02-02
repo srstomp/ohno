@@ -64,7 +64,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   created_at TEXT,
   updated_at TEXT,
   created_by TEXT,
-  activity_summary TEXT
+  activity_summary TEXT,
+  source TEXT DEFAULT 'human'
 )`;
 
 /**
@@ -82,6 +83,7 @@ export const EXTENDED_TASK_COLUMNS: [string, string][] = [
   ["updated_at", "TEXT"],
   ["created_by", "TEXT"],
   ["activity_summary", "TEXT"],
+  ["source", "TEXT DEFAULT 'human'"],
 ];
 
 /**
@@ -132,6 +134,59 @@ export const CREATE_INDEXES = [
   "CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)",
   "CREATE INDEX IF NOT EXISTS idx_tasks_story_id ON tasks(story_id)",
 ];
+
+/**
+ * Field sets for controlling response size
+ * - minimal: Core fields for task selection/listing
+ * - standard: minimal + description and handoff notes
+ * - full: All fields (current behavior)
+ */
+export const FIELD_SETS = {
+  minimal: [
+    "t.id",
+    "t.title",
+    "t.status",
+    "t.task_type",
+    "t.story_id",
+    "t.blockers",
+    "t.progress_percent",
+    "s.title as story_title",
+    "s.status as story_status",
+    "e.id as epic_id",
+    "e.title as epic_title",
+    "e.priority as epic_priority",
+    "e.status as epic_status",
+  ],
+  standard: [
+    "t.id",
+    "t.title",
+    "t.status",
+    "t.task_type",
+    "t.story_id",
+    "t.blockers",
+    "t.progress_percent",
+    "t.description",
+    "t.handoff_notes",
+    "t.estimate_hours",
+    "s.title as story_title",
+    "s.status as story_status",
+    "e.id as epic_id",
+    "e.title as epic_title",
+    "e.priority as epic_priority",
+    "e.status as epic_status",
+  ],
+  full: [
+    "t.*",
+    "s.title as story_title",
+    "s.status as story_status",
+    "e.id as epic_id",
+    "e.title as epic_title",
+    "e.priority as epic_priority",
+    "e.status as epic_status",
+  ],
+} as const;
+
+export type FieldSetName = keyof typeof FIELD_SETS;
 
 /**
  * Query to get tasks with joined epic/story info

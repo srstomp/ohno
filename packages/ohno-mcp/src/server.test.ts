@@ -141,6 +141,21 @@ describe("MCP Server", () => {
       it("should reject limit above maximum", () => {
         expect(() => GetTasksSchema.parse({ limit: 101 })).toThrow(ZodError);
       });
+
+      it("should accept fields parameter with valid values", () => {
+        expect(() => GetTasksSchema.parse({ fields: "minimal" })).not.toThrow();
+        expect(() => GetTasksSchema.parse({ fields: "standard" })).not.toThrow();
+        expect(() => GetTasksSchema.parse({ fields: "full" })).not.toThrow();
+      });
+
+      it("should default to minimal when fields not provided", () => {
+        const parsed = GetTasksSchema.parse({});
+        expect(parsed.fields).toBe("minimal");
+      });
+
+      it("should reject invalid fields values", () => {
+        expect(() => GetTasksSchema.parse({ fields: "invalid" })).toThrow(ZodError);
+      });
     });
 
     describe("TaskIdSchema", () => {
@@ -704,6 +719,34 @@ describe("MCP Server", () => {
         expect(result.tasks.length).toBe(1);
         expect(result.tasks[0].title).toBe("In progress");
       });
+
+      describe("field selection", () => {
+        it("should return minimal fields by default", async () => {
+          db.createTask({ title: "Test", description: "Long description here" });
+          const result = await handleTool("get_tasks", {}) as { tasks: Array<Record<string, unknown>> };
+          expect(result.tasks.length).toBe(1);
+          expect(result.tasks[0].id).toBeDefined();
+          expect(result.tasks[0].title).toBe("Test");
+          expect(result.tasks[0].description).toBeUndefined();
+        });
+
+        it("should return full fields when requested", async () => {
+          db.createTask({ title: "Test", description: "Long description here" });
+          const result = await handleTool("get_tasks", { fields: "full" }) as { tasks: Array<Record<string, unknown>> };
+          expect(result.tasks.length).toBe(1);
+          expect(result.tasks[0].description).toBe("Long description here");
+        });
+
+        it("should pass fields parameter to database", async () => {
+          db.createTask({ title: "Test", description: "Description" });
+
+          const minimal = await handleTool("get_tasks", { fields: "minimal" }) as { tasks: Array<Record<string, unknown>> };
+          const standard = await handleTool("get_tasks", { fields: "standard" }) as { tasks: Array<Record<string, unknown>> };
+
+          expect(minimal.tasks[0].description).toBeUndefined();
+          expect(standard.tasks[0].description).toBe("Description");
+        });
+      });
     });
 
     describe("get_task", () => {
@@ -770,6 +813,54 @@ describe("MCP Server", () => {
         const task = db.getTask(result.task_id);
         expect(task?.task_type).toBe("bug");
         expect(task?.estimate_hours).toBe(4);
+      });
+
+      it("should default to 'human' source when not provided", async () => {
+        const result = await handleTool("create_task", {
+          title: "Task without source",
+        }) as { success: boolean; task_id: string };
+
+        const task = db.getTask(result.task_id);
+        expect(task?.source).toBe("human");
+      });
+
+      it("should accept 'pokayokay-plan' source", async () => {
+        const result = await handleTool("create_task", {
+          title: "Pokayokay task",
+          source: "pokayokay-plan",
+        }) as { success: boolean; task_id: string };
+
+        const task = db.getTask(result.task_id);
+        expect(task?.source).toBe("pokayokay-plan");
+      });
+
+      it("should accept 'kaizen-fix' source", async () => {
+        const result = await handleTool("create_task", {
+          title: "Kaizen fix task",
+          source: "kaizen-fix",
+        }) as { success: boolean; task_id: string };
+
+        const task = db.getTask(result.task_id);
+        expect(task?.source).toBe("kaizen-fix");
+      });
+
+      it("should accept 'kaizen-suggest' source", async () => {
+        const result = await handleTool("create_task", {
+          title: "Kaizen suggest task",
+          source: "kaizen-suggest",
+        }) as { success: boolean; task_id: string };
+
+        const task = db.getTask(result.task_id);
+        expect(task?.source).toBe("kaizen-suggest");
+      });
+
+      it("should reject invalid source", async () => {
+        await expect(
+          handleTool("create_task", {
+            title: "Invalid source task",
+            source: "invalid-source",
+          })
+        ).rejects.toThrow(ZodError);
       });
     });
 
