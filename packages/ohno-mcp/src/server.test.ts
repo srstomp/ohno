@@ -141,6 +141,21 @@ describe("MCP Server", () => {
       it("should reject limit above maximum", () => {
         expect(() => GetTasksSchema.parse({ limit: 101 })).toThrow(ZodError);
       });
+
+      it("should accept fields parameter with valid values", () => {
+        expect(() => GetTasksSchema.parse({ fields: "minimal" })).not.toThrow();
+        expect(() => GetTasksSchema.parse({ fields: "standard" })).not.toThrow();
+        expect(() => GetTasksSchema.parse({ fields: "full" })).not.toThrow();
+      });
+
+      it("should default to minimal when fields not provided", () => {
+        const parsed = GetTasksSchema.parse({});
+        expect(parsed.fields).toBe("minimal");
+      });
+
+      it("should reject invalid fields values", () => {
+        expect(() => GetTasksSchema.parse({ fields: "invalid" })).toThrow(ZodError);
+      });
     });
 
     describe("TaskIdSchema", () => {
