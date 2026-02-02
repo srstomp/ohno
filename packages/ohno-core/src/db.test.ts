@@ -118,6 +118,38 @@ describe("TaskDatabase", () => {
         const tasks = db.getTasks({ limit: 2 });
         expect(tasks.length).toBe(2);
       });
+
+      describe("field selection", () => {
+        it("should return minimal fields by default", () => {
+          db.createTask({ title: "Test task", description: "A long description" });
+          const tasks = db.getTasks({ fields: "minimal" });
+          expect(tasks.length).toBe(4); // 3 from beforeEach + 1 new
+          const testTask = tasks.find(t => t.title === "Test task");
+          expect(testTask?.id).toBeDefined();
+          expect(testTask?.title).toBeDefined();
+          expect(testTask?.status).toBeDefined();
+          expect(testTask?.description).toBeUndefined();
+          expect(testTask?.handoff_notes).toBeUndefined();
+          expect(testTask?.activity_summary).toBeUndefined();
+        });
+
+        it("should return standard fields when requested", () => {
+          db.createTask({ title: "Test task", description: "A description" });
+          const tasks = db.getTasks({ fields: "standard" });
+          const testTask = tasks.find(t => t.title === "Test task");
+          expect(testTask?.description).toBe("A description");
+          expect(testTask?.activity_summary).toBeUndefined();
+        });
+
+        it("should return full fields when requested", () => {
+          db.createTask({ title: "Test task", description: "A description" });
+          const tasks = db.getTasks({ fields: "full" });
+          const testTask = tasks.find(t => t.title === "Test task");
+          expect(testTask?.description).toBe("A description");
+          // Full includes all columns even if null
+          expect("activity_summary" in testTask!).toBe(true);
+        });
+      });
     });
 
     describe("updateTask", () => {
