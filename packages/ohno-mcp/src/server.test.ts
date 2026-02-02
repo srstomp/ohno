@@ -719,6 +719,34 @@ describe("MCP Server", () => {
         expect(result.tasks.length).toBe(1);
         expect(result.tasks[0].title).toBe("In progress");
       });
+
+      describe("field selection", () => {
+        it("should return minimal fields by default", async () => {
+          db.createTask({ title: "Test", description: "Long description here" });
+          const result = await handleTool("get_tasks", {}) as { tasks: Array<Record<string, unknown>> };
+          expect(result.tasks.length).toBe(1);
+          expect(result.tasks[0].id).toBeDefined();
+          expect(result.tasks[0].title).toBe("Test");
+          expect(result.tasks[0].description).toBeUndefined();
+        });
+
+        it("should return full fields when requested", async () => {
+          db.createTask({ title: "Test", description: "Long description here" });
+          const result = await handleTool("get_tasks", { fields: "full" }) as { tasks: Array<Record<string, unknown>> };
+          expect(result.tasks.length).toBe(1);
+          expect(result.tasks[0].description).toBe("Long description here");
+        });
+
+        it("should pass fields parameter to database", async () => {
+          db.createTask({ title: "Test", description: "Description" });
+
+          const minimal = await handleTool("get_tasks", { fields: "minimal" }) as { tasks: Array<Record<string, unknown>> };
+          const standard = await handleTool("get_tasks", { fields: "standard" }) as { tasks: Array<Record<string, unknown>> };
+
+          expect(minimal.tasks[0].description).toBeUndefined();
+          expect(standard.tasks[0].description).toBe("Description");
+        });
+      });
     });
 
     describe("get_task", () => {
