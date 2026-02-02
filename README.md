@@ -194,7 +194,7 @@ Run `npx @stevestomp/ohno-cli serve` to view tasks at http://localhost:3333/kanb
 |------|-------------|
 | `get_session_context()` | **Start here** - in-progress tasks, blockers, recent activity |
 | `get_project_status()` | Overall progress statistics |
-| `get_tasks(status?, priority?)` | List tasks with filtering |
+| `get_tasks(status?, priority?, fields?)` | List tasks with filtering. `fields`: `"minimal"` (default), `"standard"`, `"full"` |
 | `get_task(task_id)` | Full details for a specific task |
 | `get_next_task()` | Recommended task based on priority |
 | `get_blocked_tasks()` | All blocked tasks with reasons |

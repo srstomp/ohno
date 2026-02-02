@@ -42,11 +42,23 @@ Or for a specific project (`.claude/settings.local.json` or `.mcp.json`):
 |------|-------------|
 | `get_session_context` | **Start here** - in-progress tasks, blockers, recent activity |
 | `get_project_status` | Overall progress statistics |
-| `get_tasks` | List tasks with optional status/priority filtering |
+| `get_tasks` | List tasks with optional filtering. Accepts `fields` param: `"minimal"` (default), `"standard"`, or `"full"` |
 | `get_task` | Full details for a specific task |
 | `get_next_task` | Recommended task based on priority |
 | `get_blocked_tasks` | All blocked tasks with reasons |
 | `get_kanban_board` | Tasks organized by status columns |
+
+#### Field Selection for `get_tasks`
+
+The `fields` parameter controls response size:
+
+| Value | Fields Returned | Use Case |
+|-------|-----------------|----------|
+| `"minimal"` (default) | id, title, status, priority, story_id | Task selection, listing |
+| `"standard"` | + description, task_type, estimate_hours, progress_percent | Task overview |
+| `"full"` | All fields including handoff_notes, context_summary, etc. | Detailed inspection |
+
+Using `"minimal"` reduces response size by ~75% compared to `"full"`.
 
 ### Update Tools
 | Tool | Description |
