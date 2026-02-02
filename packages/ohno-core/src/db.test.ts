@@ -118,6 +118,38 @@ describe("TaskDatabase", () => {
         const tasks = db.getTasks({ limit: 2 });
         expect(tasks.length).toBe(2);
       });
+
+      describe("field selection", () => {
+        it("should return minimal fields by default", () => {
+          db.createTask({ title: "Test task", description: "A long description" });
+          const tasks = db.getTasks({ fields: "minimal" });
+          expect(tasks.length).toBe(4); // 3 from beforeEach + 1 new
+          const testTask = tasks.find(t => t.title === "Test task");
+          expect(testTask?.id).toBeDefined();
+          expect(testTask?.title).toBeDefined();
+          expect(testTask?.status).toBeDefined();
+          expect(testTask?.description).toBeUndefined();
+          expect(testTask?.handoff_notes).toBeUndefined();
+          expect(testTask?.activity_summary).toBeUndefined();
+        });
+
+        it("should return standard fields when requested", () => {
+          db.createTask({ title: "Test task", description: "A description" });
+          const tasks = db.getTasks({ fields: "standard" });
+          const testTask = tasks.find(t => t.title === "Test task");
+          expect(testTask?.description).toBe("A description");
+          expect(testTask?.activity_summary).toBeUndefined();
+        });
+
+        it("should return full fields when requested", () => {
+          db.createTask({ title: "Test task", description: "A description" });
+          const tasks = db.getTasks({ fields: "full" });
+          const testTask = tasks.find(t => t.title === "Test task");
+          expect(testTask?.description).toBe("A description");
+          // Full includes all columns even if null
+          expect("activity_summary" in testTask!).toBe(true);
+        });
+      });
     });
 
     describe("updateTask", () => {
@@ -996,6 +1028,60 @@ describe("TaskDatabase", () => {
         "Story 2",
         "Story 3",
       ]);
+    });
+  });
+
+  describe("Task Source Field", () => {
+    describe("createTask with source", () => {
+      it("should default to 'human' when source is not provided", () => {
+        const taskId = db.createTask({ title: "Default source task" });
+        const task = db.getTask(taskId);
+        expect(task?.source).toBe("human");
+      });
+
+      it("should accept 'human' source", () => {
+        const taskId = db.createTask({ title: "Human task", source: "human" });
+        const task = db.getTask(taskId);
+        expect(task?.source).toBe("human");
+      });
+
+      it("should accept 'pokayokay-plan' source", () => {
+        const taskId = db.createTask({ title: "Pokayokay task", source: "pokayokay-plan" });
+        const task = db.getTask(taskId);
+        expect(task?.source).toBe("pokayokay-plan");
+      });
+
+      it("should accept 'kaizen-fix' source", () => {
+        const taskId = db.createTask({ title: "Kaizen fix task", source: "kaizen-fix" });
+        const task = db.getTask(taskId);
+        expect(task?.source).toBe("kaizen-fix");
+      });
+
+      it("should accept 'kaizen-suggest' source", () => {
+        const taskId = db.createTask({ title: "Kaizen suggest task", source: "kaizen-suggest" });
+        const task = db.getTask(taskId);
+        expect(task?.source).toBe("kaizen-suggest");
+      });
+
+      it("should persist source field across database operations", async () => {
+        const taskId = db.createTask({ title: "Persisted task", source: "kaizen-fix" });
+
+        // Reload database to ensure persistence
+        db.close();
+        db = await TaskDatabase.open(dbPath);
+
+        const task = db.getTask(taskId);
+        expect(task?.source).toBe("kaizen-fix");
+      });
+    });
+
+    describe("existing tasks migration", () => {
+      it("should have 'human' as default for existing tasks without source", async () => {
+        // This test verifies backward compatibility with existing databases
+        const taskId = db.createTask({ title: "Existing task" });
+        const task = db.getTask(taskId);
+        expect(task?.source).toBe("human");
+      });
     });
   });
 

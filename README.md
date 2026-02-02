@@ -238,9 +238,34 @@ See [pokayokay](https://github.com/srstomp/pokayokay) for hook integration examp
 | Tool | Description |
 |------|-------------|
 | `create_story(title, epic_id?, description?)` | Create a new story to organize tasks under |
-| `create_task(title, story_id?, ...)` | Create new task, optionally under a story |
+| `create_task(title, story_id?, source?, ...)` | Create new task with optional source tracking |
 | `update_task(task_id, ...)` | Modify task details |
 | `archive_task(task_id, reason)` | Archive task no longer needed |
+
+#### Task Source Tracking
+
+The `source` parameter on `create_task` tracks task origin:
+
+| Source Value | Description |
+|--------------|-------------|
+| `human` | Created manually by a human (default) |
+| `pokayokay-plan` | Created by pokayokay planner from acceptance criteria |
+| `kaizen-fix` | Created by kaizen auto-fix system |
+| `kaizen-suggest` | Created by kaizen suggestion system |
+
+**Example:**
+```bash
+# CLI with --source flag
+ohno create "Fix memory leak" --source kaizen-fix
+
+# MCP tool call (uses named parameters)
+# create_task({ title: "Fix bug", source: "kaizen-fix" })
+
+# Defaults to "human" if source not specified
+ohno create "Add authentication"
+```
+
+This enables filtering and analytics on how tasks enter the system, particularly useful for tracking AI-generated work.
 
 ## CLI Reference
 
@@ -265,12 +290,13 @@ ohno tasks -p P0 --json         # Filter by priority, JSON output
 ohno task task-abc123           # Get full task details
 
 # Task lifecycle
-ohno create "Fix the bug"       # Create new task
-ohno start task-abc             # Start working (-> in_progress)
-ohno done task-abc              # Mark complete (-> done)
-ohno review task-abc            # Mark for review
-ohno block task-abc "reason"    # Set blocker
-ohno unblock task-abc           # Resolve blocker
+ohno create "Fix the bug"                    # Create new task (defaults to source: human)
+ohno create "Fix bug" --source kaizen-fix    # Create task with source tracking
+ohno start task-abc                          # Start working (-> in_progress)
+ohno done task-abc                           # Mark complete (-> done)
+ohno review task-abc                         # Mark for review
+ohno block task-abc "reason"                 # Set blocker
+ohno unblock task-abc                        # Resolve blocker
 
 # Dependencies
 ohno dep add task-b task-a      # task-b depends on task-a

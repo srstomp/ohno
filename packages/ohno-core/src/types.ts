@@ -11,11 +11,17 @@ export type TaskType = "feature" | "bug" | "chore" | "spike" | "test";
 // Priority enum
 export type Priority = "P0" | "P1" | "P2" | "P3";
 
+// Task source enum
+export type TaskSource = "human" | "pokayokay-plan" | "kaizen-fix" | "kaizen-suggest";
+
 // Activity type enum
 export type ActivityType = "status_change" | "note" | "file_change" | "decision" | "progress" | "created" | "updated" | "blocker_set" | "blocker_resolved";
 
 // Dependency type enum
 export type DependencyType = "blocks" | "requires" | "relates_to";
+
+// Field set for get_tasks response size control
+export type FieldSet = "minimal" | "standard" | "full";
 
 /**
  * Core task record
@@ -38,6 +44,7 @@ export interface Task {
   updated_at?: string;
   created_by?: string;
   activity_summary?: string;
+  source?: TaskSource;
   // Joined fields from relationships
   story_title?: string;
   story_status?: TaskStatus;
@@ -115,6 +122,7 @@ export interface CreateTaskOptions {
   description?: string;
   estimate_hours?: number;
   actor?: string;
+  source?: TaskSource;
 }
 
 /**
@@ -209,6 +217,7 @@ export interface GetTasksOptions {
   story_status?: TaskStatus;
   epic_status?: TaskStatus;
   limit?: number;
+  fields?: FieldSet;
 }
 
 /**

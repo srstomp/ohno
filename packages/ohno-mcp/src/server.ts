@@ -18,6 +18,7 @@ const GetTasksSchema = z.object({
   story_status: z.enum(["todo", "in_progress", "review", "done", "blocked"]).optional(),
   epic_status: z.enum(["todo", "in_progress", "review", "done", "blocked"]).optional(),
   limit: z.number().min(1).max(100).default(50),
+  fields: z.enum(["minimal", "standard", "full"]).default("minimal"),
 });
 
 const TaskIdSchema = z.object({
@@ -36,6 +37,7 @@ const CreateTaskSchema = z.object({
   task_type: z.enum(["feature", "bug", "chore", "spike", "test"]).default("feature"),
   description: z.string().optional(),
   estimate_hours: z.number().optional(),
+  source: z.enum(["human", "pokayokay-plan", "kaizen-fix", "kaizen-suggest"]).optional(),
 });
 
 const CreateStorySchema = z.object({
@@ -158,7 +160,7 @@ const TOOLS = [
   },
   {
     name: "get_tasks",
-    description: "List tasks with optional filtering by status, priority, story_status, and epic_status",
+    description: "List tasks with optional filtering. Returns minimal fields by default for efficiency. Use fields='standard' for descriptions, or fields='full' for all data.",
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -167,6 +169,7 @@ const TOOLS = [
         story_status: { type: "string", enum: ["todo", "in_progress", "review", "done", "blocked"], description: "Filter by parent story status" },
         epic_status: { type: "string", enum: ["todo", "in_progress", "review", "done", "blocked"], description: "Filter by parent epic status" },
         limit: { type: "number", description: "Maximum tasks to return (1-100)", default: 50 },
+        fields: { type: "string", enum: ["minimal", "standard", "full"], description: "Field set to return: minimal (default, for selection), standard (with descriptions), full (all fields)", default: "minimal" },
       },
     },
   },
@@ -276,6 +279,7 @@ const TOOLS = [
         task_type: { type: "string", enum: ["feature", "bug", "chore", "spike", "test"], description: "Task type", default: "feature" },
         description: { type: "string", description: "Task description" },
         estimate_hours: { type: "number", description: "Estimated hours" },
+        source: { type: "string", enum: ["human", "pokayokay-plan", "kaizen-fix", "kaizen-suggest"], description: "Source of the task (defaults to 'human')" },
       },
       required: ["title"],
     },
