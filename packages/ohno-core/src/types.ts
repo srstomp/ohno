@@ -20,6 +20,9 @@ export type ActivityType = "status_change" | "note" | "file_change" | "decision"
 // Dependency type enum
 export type DependencyType = "blocks" | "requires" | "relates_to";
 
+// Failure type enum
+export type FailureType = "spec" | "quality" | "implementation";
+
 // Field set for get_tasks response size control
 export type FieldSet = "minimal" | "standard" | "full";
 
@@ -45,6 +48,7 @@ export interface Task {
   created_by?: string;
   activity_summary?: string;
   source?: TaskSource;
+  needs_rework?: number;
   // Joined fields from relationships
   story_title?: string;
   story_status?: TaskStatus;
@@ -82,6 +86,18 @@ export interface TaskDependency {
   // Joined fields
   depends_on_title?: string;
   depends_on_status?: TaskStatus;
+}
+
+/**
+ * Task failure record for tracking retry failures
+ */
+export interface TaskFailure {
+  id: string;
+  task_id: string;
+  failure_type: FailureType;
+  failure_reason: string;
+  attempt?: number;
+  created_at?: string;
 }
 
 /**

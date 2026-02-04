@@ -12,6 +12,7 @@ import type {
   Task,
   TaskActivity,
   TaskDependency,
+  TaskFailure,
   ProjectStatus,
   SessionContext,
   CreateTaskOptions,
@@ -23,6 +24,7 @@ import type {
   GetEpicsOptions,
   TaskStatus,
   DependencyType,
+  FailureType,
   TaskCompletionBoundaries,
   UpdateStatusResult,
   Epic,
@@ -34,6 +36,7 @@ import {
   generateDependencyId,
   generateStoryId,
   generateEpicId,
+  generateFailureId,
   getTimestamp,
   sortByPriority,
 } from "./utils.js";
@@ -45,6 +48,7 @@ import {
   CREATE_TASK_ACTIVITY_TABLE,
   CREATE_TASK_FILES_TABLE,
   CREATE_TASK_DEPENDENCIES_TABLE,
+  CREATE_TASK_FAILURES_TABLE,
   CREATE_INDEXES,
   EXTENDED_TASK_COLUMNS,
   GET_TASK_BY_ID,
@@ -146,6 +150,7 @@ export class TaskDatabase {
     this.db.run(CREATE_TASK_ACTIVITY_TABLE);
     this.db.run(CREATE_TASK_FILES_TABLE);
     this.db.run(CREATE_TASK_DEPENDENCIES_TABLE);
+    this.db.run(CREATE_TASK_FAILURES_TABLE);
 
     // Add extended columns if missing (backwards compatibility)
     for (const [colName, colType] of EXTENDED_TASK_COLUMNS) {
@@ -867,11 +872,19 @@ export class TaskDatabase {
     const oldStatus = task.status;
     const timestamp = getTimestamp();
 
-    const sql = `
-      UPDATE tasks
-      SET status = ?, updated_at = ?, handoff_notes = COALESCE(?, handoff_notes)
-      WHERE id = ?
-    `;
+    // Clear needs_rework when completing or archiving task
+    const clearNeedsRework = status === "done" || status === "archived";
+    const sql = clearNeedsRework
+      ? `
+        UPDATE tasks
+        SET status = ?, updated_at = ?, handoff_notes = COALESCE(?, handoff_notes), needs_rework = 0
+        WHERE id = ?
+      `
+      : `
+        UPDATE tasks
+        SET status = ?, updated_at = ?, handoff_notes = COALESCE(?, handoff_notes)
+        WHERE id = ?
+      `;
 
     this.db.run(sql, [status, timestamp, notes ?? null, taskId]);
     const changes = this.db.getRowsModified();
@@ -983,6 +996,37 @@ export class TaskDatabase {
 
     if (changes > 0) {
       this.addTaskActivity(taskId, "blocker_resolved", "Blocker resolved", actor);
+      this.save();
+    }
+
+    return changes > 0;
+  }
+
+  /**
+   * Set needs_rework flag on a task
+   */
+  setNeedsRework(taskId: string, value: boolean, actor?: string): boolean {
+    const task = this.getTask(taskId);
+    if (!task) {
+      return false;
+    }
+
+    const sql = `
+      UPDATE tasks
+      SET needs_rework = ?, updated_at = ?
+      WHERE id = ?
+    `;
+
+    this.db.run(sql, [value ? 1 : 0, getTimestamp(), taskId]);
+    const changes = this.db.getRowsModified();
+
+    if (changes > 0) {
+      this.addTaskActivity(
+        taskId,
+        "updated",
+        `Task ${value ? "marked as" : "cleared from"} needs rework`,
+        actor
+      );
       this.save();
     }
 
@@ -1235,5 +1279,60 @@ export class TaskDatabase {
 
     this.save();
     return summary;
+  }
+
+  // ==========================================================================
+  // Failure Methods
+  // ==========================================================================
+
+  /**
+   * Add a task failure record
+   */
+  addTaskFailure(
+    taskId: string,
+    failureType: FailureType,
+    failureReason: string,
+    attempt?: number
+  ): string {
+    const timestamp = getTimestamp();
+    const failureId = generateFailureId(taskId, failureType, timestamp);
+
+    const sql = `
+      INSERT INTO task_failures (id, task_id, failure_type, failure_reason, attempt, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `;
+
+    this.db.run(sql, [
+      failureId,
+      taskId,
+      failureType,
+      failureReason,
+      attempt ?? null,
+      timestamp,
+    ]);
+
+    this.save();
+    return failureId;
+  }
+
+  /**
+   * Get failure records for a task
+   */
+  getTaskFailures(taskId: string): TaskFailure[] {
+    const sql = `
+      SELECT * FROM task_failures
+      WHERE task_id = ?
+      ORDER BY created_at DESC
+    `;
+    const stmt = this.db.prepare(sql);
+    stmt.bind([taskId]);
+
+    const rows: TaskFailure[] = [];
+    while (stmt.step()) {
+      rows.push(stmt.getAsObject() as unknown as TaskFailure);
+    }
+    stmt.free();
+
+    return rows;
   }
 }
