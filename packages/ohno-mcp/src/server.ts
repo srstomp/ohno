@@ -81,6 +81,11 @@ const ArchiveSchema = z.object({
   reason: z.string().optional(),
 });
 
+const NeedsReworkSchema = z.object({
+  task_id: z.string().min(1),
+  value: z.boolean(),
+});
+
 const DependencySchema = z.object({
   task_id: z.string().min(1),
   depends_on_task_id: z.string().min(1),
@@ -266,6 +271,18 @@ const TOOLS = [
         task_id: { type: "string", description: "Task ID" },
       },
       required: ["task_id"],
+    },
+  },
+  {
+    name: "set_needs_rework",
+    description: "Mark a task as needing rework or clear the flag. Tasks marked for rework can be retried.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        task_id: { type: "string", description: "Task ID" },
+        value: { type: "boolean", description: "True to mark as needs rework, false to clear the flag" },
+      },
+      required: ["task_id", "value"],
     },
   },
   {
@@ -610,6 +627,12 @@ export async function handleTool(name: string, args: Record<string, unknown>): P
     case "resolve_blocker": {
       const parsed = TaskIdSchema.parse(args);
       const success = database.resolveBlocker(parsed.task_id);
+      return { success };
+    }
+
+    case "set_needs_rework": {
+      const parsed = NeedsReworkSchema.parse(args);
+      const success = database.setNeedsRework(parsed.task_id, parsed.value);
       return { success };
     }
 

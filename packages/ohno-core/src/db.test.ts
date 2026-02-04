@@ -1126,4 +1126,111 @@ describe("TaskDatabase", () => {
       });
     });
   });
+
+  describe("Needs Rework Flag", () => {
+    describe("setNeedsRework", () => {
+      it("should set needs_rework flag to true", () => {
+        const taskId = db.createTask({ title: "Task needs rework" });
+        const result = db.setNeedsRework(taskId, true);
+        expect(result).toBe(true);
+
+        const task = db.getTask(taskId);
+        expect(task?.needs_rework).toBe(1);
+      });
+
+      it("should set needs_rework flag to false", () => {
+        const taskId = db.createTask({ title: "Task fixed" });
+        db.setNeedsRework(taskId, true);
+        const result = db.setNeedsRework(taskId, false);
+        expect(result).toBe(true);
+
+        const task = db.getTask(taskId);
+        expect(task?.needs_rework).toBe(0);
+      });
+
+      it("should return false for non-existent task", () => {
+        const result = db.setNeedsRework("non-existent", true);
+        expect(result).toBe(false);
+      });
+
+      it("should log activity when setting needs_rework", () => {
+        const taskId = db.createTask({ title: "Activity test" });
+        db.setNeedsRework(taskId, true);
+
+        const activity = db.getTaskActivity(taskId);
+        const reworkActivity = activity.find((a) => a.description?.includes("needs rework"));
+        expect(reworkActivity).toBeDefined();
+      });
+    });
+
+    describe("needs_rework with task completion", () => {
+      it("should clear needs_rework flag when task is marked as done", () => {
+        const taskId = db.createTask({ title: "Task to complete" });
+        db.setNeedsRework(taskId, true);
+
+        db.updateTaskStatus(taskId, "done");
+        const task = db.getTask(taskId);
+        expect(task?.needs_rework).toBe(0);
+      });
+
+      it("should clear needs_rework flag when task is archived", () => {
+        const taskId = db.createTask({ title: "Task to archive" });
+        db.setNeedsRework(taskId, true);
+
+        db.updateTaskStatus(taskId, "archived");
+        const task = db.getTask(taskId);
+        expect(task?.needs_rework).toBe(0);
+      });
+
+      it("should not clear needs_rework when transitioning to other statuses", () => {
+        const taskId = db.createTask({ title: "Task in progress" });
+        db.setNeedsRework(taskId, true);
+
+        db.updateTaskStatus(taskId, "in_progress");
+        const task = db.getTask(taskId);
+        expect(task?.needs_rework).toBe(1);
+      });
+    });
+
+    describe("needs_rework persistence", () => {
+      it("should persist needs_rework across database reloads", async () => {
+        const taskId = db.createTask({ title: "Persistent rework" });
+        db.setNeedsRework(taskId, true);
+
+        db.close();
+        db = await TaskDatabase.open(dbPath);
+
+        const task = db.getTask(taskId);
+        expect(task?.needs_rework).toBe(1);
+      });
+    });
+
+    describe("getTasks with needs_rework", () => {
+      it("should return tasks with needs_rework flag", () => {
+        const task1 = db.createTask({ title: "Task 1" });
+        const task2 = db.createTask({ title: "Task 2" });
+        const task3 = db.createTask({ title: "Task 3" });
+
+        db.setNeedsRework(task1, true);
+        db.setNeedsRework(task3, true);
+
+        const tasks = db.getTasks({ fields: "full" });
+        const reworkTask1 = tasks.find(t => t.id === task1);
+        const reworkTask2 = tasks.find(t => t.id === task2);
+        const reworkTask3 = tasks.find(t => t.id === task3);
+
+        expect(reworkTask1?.needs_rework).toBe(1);
+        expect(reworkTask2?.needs_rework).toBe(0);
+        expect(reworkTask3?.needs_rework).toBe(1);
+      });
+    });
+
+    describe("default value", () => {
+      it("should default needs_rework to 0 for new tasks", () => {
+        const taskId = db.createTask({ title: "New task" });
+        const task = db.getTask(taskId);
+        expect(task?.needs_rework).toBe(0);
+      });
+    });
+  });
 });
