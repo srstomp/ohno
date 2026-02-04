@@ -81,6 +81,11 @@ const ArchiveSchema = z.object({
   reason: z.string().optional(),
 });
 
+const NeedsReworkSchema = z.object({
+  task_id: z.string().min(1),
+  value: z.boolean(),
+});
+
 const DependencySchema = z.object({
   task_id: z.string().min(1),
   depends_on_task_id: z.string().min(1),
@@ -95,6 +100,13 @@ const RemoveDependencySchema = z.object({
 const SummarizeSchema = z.object({
   task_id: z.string().min(1),
   delete_raw: z.boolean().default(false),
+});
+
+const RecordFailureSchema = z.object({
+  task_id: z.string().min(1),
+  failure_type: z.enum(["spec", "quality", "implementation"]),
+  reason: z.string().min(1),
+  attempt: z.number().optional(),
 });
 
 const CreateEpicSchema = z.object({
@@ -146,6 +158,10 @@ const KanbanBoardSchema = z.object({
   limit_per_column: z.number().min(1).max(50).default(20),
 });
 
+const GetNextBatchSchema = z.object({
+  batch_size: z.number().min(1).max(5).default(3),
+});
+
 // Tool definitions
 const TOOLS = [
   {
@@ -188,6 +204,16 @@ const TOOLS = [
     name: "get_next_task",
     description: "Get the recommended next task to work on based on priority and dependencies",
     inputSchema: { type: "object" as const, properties: {} },
+  },
+  {
+    name: "get_next_batch",
+    description: "Get a batch of up to N tasks ready for immediate execution. Returns tasks with status=todo or needs_rework=1, excluding tasks with unmet dependencies. Tasks are ordered by epic priority (P0 first) then creation date. Tasks needing rework include failure_context with previous failure details.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        batch_size: { type: "number", description: "Number of tasks to return (1-5, default 3)", default: 3 },
+      },
+    },
   },
   {
     name: "get_blocked_tasks",
@@ -266,6 +292,18 @@ const TOOLS = [
         task_id: { type: "string", description: "Task ID" },
       },
       required: ["task_id"],
+    },
+  },
+  {
+    name: "set_needs_rework",
+    description: "Mark a task as needing rework or clear the flag. Tasks marked for rework can be retried.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        task_id: { type: "string", description: "Task ID" },
+        value: { type: "boolean", description: "True to mark as needs rework, false to clear the flag" },
+      },
+      required: ["task_id", "value"],
     },
   },
   {
@@ -474,6 +512,20 @@ const TOOLS = [
       required: ["task_id"],
     },
   },
+  {
+    name: "record_task_failure",
+    description: "Record a task failure for pattern learning. Stores failure information including type, reason, and optional attempt number.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        task_id: { type: "string", description: "Task ID" },
+        failure_type: { type: "string", enum: ["spec", "quality", "implementation"], description: "Type of failure: spec (requirements issue), quality (quality issue), implementation (technical issue)" },
+        reason: { type: "string", description: "Human-readable description of why the task failed" },
+        attempt: { type: "number", description: "Optional attempt number" },
+      },
+      required: ["task_id", "failure_type", "reason"],
+    },
+  },
 ];
 
 // Export schemas for testing
@@ -491,6 +543,7 @@ export {
   UpdateEpicSchema,
   GetEpicsSchema,
   KanbanBoardSchema,
+  GetNextBatchSchema,
   UpdateTaskSchema,
   ActivitySchema,
   HandoffNotesSchema,
@@ -500,6 +553,7 @@ export {
   DependencySchema,
   RemoveDependencySchema,
   SummarizeSchema,
+  RecordFailureSchema,
 };
 
 // Export tool definitions for testing
@@ -561,6 +615,12 @@ export async function handleTool(name: string, args: Record<string, unknown>): P
       return task;
     }
 
+    case "get_next_batch": {
+      const parsed = GetNextBatchSchema.parse(args);
+      const tasks = database.getNextBatch(parsed.batch_size);
+      return { tasks, batch_size: tasks.length };
+    }
+
     case "get_blocked_tasks":
       return { tasks: database.getBlockedTasks() };
 
@@ -610,6 +670,12 @@ export async function handleTool(name: string, args: Record<string, unknown>): P
     case "resolve_blocker": {
       const parsed = TaskIdSchema.parse(args);
       const success = database.resolveBlocker(parsed.task_id);
+      return { success };
+    }
+
+    case "set_needs_rework": {
+      const parsed = NeedsReworkSchema.parse(args);
+      const success = database.setNeedsRework(parsed.task_id, parsed.value);
       return { success };
     }
 
@@ -750,6 +816,17 @@ export async function handleTool(name: string, args: Record<string, unknown>): P
         return { success: false, message: "Not enough activity to summarize" };
       }
       return { success: true, summary };
+    }
+
+    case "record_task_failure": {
+      const parsed = RecordFailureSchema.parse(args);
+      const failureId = database.addTaskFailure(
+        parsed.task_id,
+        parsed.failure_type as "spec" | "quality" | "implementation",
+        parsed.reason,
+        parsed.attempt
+      );
+      return { success: true, failure_id: failureId };
     }
 
     default:

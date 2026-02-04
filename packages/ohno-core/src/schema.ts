@@ -84,6 +84,7 @@ export const EXTENDED_TASK_COLUMNS: [string, string][] = [
   ["created_by", "TEXT"],
   ["activity_summary", "TEXT"],
   ["source", "TEXT DEFAULT 'human'"],
+  ["needs_rework", "INTEGER DEFAULT 0"],
 ];
 
 /**
@@ -126,6 +127,19 @@ CREATE TABLE IF NOT EXISTS task_dependencies (
 )`;
 
 /**
+ * SQL to create the task_failures table
+ */
+export const CREATE_TASK_FAILURES_TABLE = `
+CREATE TABLE IF NOT EXISTS task_failures (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL,
+  failure_type TEXT NOT NULL,
+  failure_reason TEXT NOT NULL,
+  attempt INTEGER,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+)`;
+
+/**
  * Indexes for performance
  */
 export const CREATE_INDEXES = [
@@ -133,6 +147,7 @@ export const CREATE_INDEXES = [
   "CREATE INDEX IF NOT EXISTS idx_task_deps_task_id ON task_dependencies(task_id)",
   "CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)",
   "CREATE INDEX IF NOT EXISTS idx_tasks_story_id ON tasks(story_id)",
+  "CREATE INDEX IF NOT EXISTS idx_task_failures_task_id ON task_failures(task_id)",
 ];
 
 /**
