@@ -558,6 +558,60 @@ describe("TaskDatabase", () => {
         const ctx = db.getSessionContext();
         expect(ctx.suggested_next_task).toBeDefined();
       });
+
+      it("should include WIP data for in-progress tasks", () => {
+        const taskId = db.createTask({ title: "In progress with WIP" });
+        db.updateTaskStatus(taskId, "in_progress");
+
+        // Update WIP data
+        const wipData = {
+          phase: "testing",
+          files_modified: ["src/auth.ts", "src/types.ts"],
+          next_step: "Fix failing test - token expiry edge case"
+        };
+        db.updateTaskWip(taskId, wipData);
+
+        const ctx = db.getSessionContext();
+        expect(ctx.in_progress_tasks.length).toBe(1);
+        expect(ctx.in_progress_tasks[0].work_in_progress).toBeDefined();
+        expect(ctx.in_progress_tasks[0].wip_updated_at).toBeDefined();
+
+        // Verify the WIP data is valid JSON and contains expected fields
+        const wip = JSON.parse(ctx.in_progress_tasks[0].work_in_progress!);
+        expect(wip.phase).toBe("testing");
+        expect(wip.next_step).toBe("Fix failing test - token expiry edge case");
+        expect(wip.files_modified).toEqual(["src/auth.ts", "src/types.ts"]);
+      });
+
+      it("should include WIP in suggested_next_task if in-progress", () => {
+        const taskId = db.createTask({ title: "In progress task" });
+        db.updateTaskStatus(taskId, "in_progress");
+
+        const wipData = {
+          phase: "implementation",
+          next_step: "Add error handling"
+        };
+        db.updateTaskWip(taskId, wipData);
+
+        const ctx = db.getSessionContext();
+        expect(ctx.suggested_next_task).toBeDefined();
+        expect(ctx.suggested_next_task!.status).toBe("in_progress");
+        expect(ctx.suggested_next_task!.work_in_progress).toBeDefined();
+
+        const wip = JSON.parse(ctx.suggested_next_task!.work_in_progress!);
+        expect(wip.phase).toBe("implementation");
+        expect(wip.next_step).toBe("Add error handling");
+      });
+
+      it("should not include WIP fields for blocked tasks", () => {
+        const taskId = db.createTask({ title: "Blocked task" });
+        db.setBlocker(taskId, "Waiting for API");
+
+        const ctx = db.getSessionContext();
+        expect(ctx.blocked_tasks.length).toBe(1);
+        // Blocked tasks use minimal fields, so WIP should not be present
+        // even if it exists in the database
+      });
     });
 
     describe("getNextTask", () => {
