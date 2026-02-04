@@ -35,6 +35,7 @@ import {
   GetEpicsSchema,
   GetNextBatchSchema,
   RecordFailureSchema,
+  UpdateTaskWipSchema,
 } from "./server.js";
 
 describe("MCP Server", () => {
@@ -56,8 +57,8 @@ describe("MCP Server", () => {
   });
 
   describe("Tool Definitions", () => {
-    it("should have 31 tools defined", () => {
-      expect(TOOLS.length).toBe(31);
+    it("should have 32 tools defined", () => {
+      expect(TOOLS.length).toBe(32);
     });
 
     it("should have unique tool names", () => {
@@ -795,6 +796,56 @@ describe("MCP Server", () => {
             task_id: "task-123",
             failure_type: "spec",
             reason: "",
+          })
+        ).toThrow(ZodError);
+      });
+    });
+
+    describe("UpdateTaskWipSchema", () => {
+      it("should accept valid WIP update with all required fields", () => {
+        const result = UpdateTaskWipSchema.parse({
+          task_id: "task-123",
+          wip_data: { phase: "testing", files_modified: ["src/auth.ts"] },
+        });
+        expect(result.task_id).toBe("task-123");
+        expect(result.wip_data).toEqual({ phase: "testing", files_modified: ["src/auth.ts"] });
+      });
+
+      it("should accept complex nested wip_data", () => {
+        const wipData = {
+          phase: "testing",
+          files_modified: ["src/auth.ts", "src/types.ts"],
+          decisions: [{ decision: "JWT", reason: "Stateless" }],
+          test_results: { ran: true, passed: 12, failed: 1 },
+        };
+        const result = UpdateTaskWipSchema.parse({
+          task_id: "task-123",
+          wip_data: wipData,
+        });
+        expect(result.wip_data).toEqual(wipData);
+      });
+
+      it("should reject empty task_id", () => {
+        expect(() =>
+          UpdateTaskWipSchema.parse({
+            task_id: "",
+            wip_data: { phase: "testing" },
+          })
+        ).toThrow(ZodError);
+      });
+
+      it("should reject missing task_id", () => {
+        expect(() =>
+          UpdateTaskWipSchema.parse({
+            wip_data: { phase: "testing" },
+          })
+        ).toThrow(ZodError);
+      });
+
+      it("should reject missing wip_data", () => {
+        expect(() =>
+          UpdateTaskWipSchema.parse({
+            task_id: "task-123",
           })
         ).toThrow(ZodError);
       });
@@ -1845,6 +1896,104 @@ describe("MCP Server", () => {
             reason: "",
           })
         ).rejects.toThrow(ZodError);
+      });
+    });
+
+    describe("update_task_wip", () => {
+      it("should update task WIP and return success", async () => {
+        const taskId = db.createTask({ title: "Test task" });
+        const result = await handleTool("update_task_wip", {
+          task_id: taskId,
+          wip_data: { phase: "testing", files_modified: ["src/auth.ts"] },
+        }) as { success: boolean };
+
+        expect(result.success).toBe(true);
+
+        // Verify WIP was updated
+        const task = db.getTask(taskId);
+        expect(task?.work_in_progress).toBeDefined();
+        const parsedWip = JSON.parse(task!.work_in_progress!);
+        expect(parsedWip.phase).toBe("testing");
+        expect(parsedWip.files_modified).toEqual(["src/auth.ts"]);
+      });
+
+      it("should merge WIP data with existing WIP", async () => {
+        const taskId = db.createTask({ title: "Test task" });
+
+        // First update
+        await handleTool("update_task_wip", {
+          task_id: taskId,
+          wip_data: { phase: "implementation", files_modified: ["file1.ts"] },
+        });
+
+        // Second update - merge
+        await handleTool("update_task_wip", {
+          task_id: taskId,
+          wip_data: { phase: "testing", next_step: "Run tests" },
+        });
+
+        const task = db.getTask(taskId);
+        const parsedWip = JSON.parse(task!.work_in_progress!);
+        expect(parsedWip.phase).toBe("testing"); // Overwritten
+        expect(parsedWip.files_modified).toEqual(["file1.ts"]); // Preserved
+        expect(parsedWip.next_step).toBe("Run tests"); // Added
+      });
+
+      it("should return error for non-existent task", async () => {
+        const result = await handleTool("update_task_wip", {
+          task_id: "non-existent",
+          wip_data: { phase: "testing" },
+        }) as { error?: string };
+
+        expect(result.error).toBe("Task not found");
+      });
+
+      it("should reject missing task_id", async () => {
+        await expect(
+          handleTool("update_task_wip", {
+            wip_data: { phase: "testing" },
+          })
+        ).rejects.toThrow(ZodError);
+      });
+
+      it("should reject missing wip_data", async () => {
+        const taskId = db.createTask({ title: "Test task" });
+        await expect(
+          handleTool("update_task_wip", {
+            task_id: taskId,
+          })
+        ).rejects.toThrow(ZodError);
+      });
+
+      it("should reject empty task_id", async () => {
+        await expect(
+          handleTool("update_task_wip", {
+            task_id: "",
+            wip_data: { phase: "testing" },
+          })
+        ).rejects.toThrow(ZodError);
+      });
+
+      it("should handle complex nested WIP data", async () => {
+        const taskId = db.createTask({ title: "Test task" });
+        const wipData = {
+          phase: "testing",
+          files_modified: ["src/auth.ts", "src/types.ts"],
+          decisions: [{ decision: "JWT over sessions", reason: "Stateless" }],
+          test_results: { ran: true, passed: 12, failed: 1 },
+        };
+
+        const result = await handleTool("update_task_wip", {
+          task_id: taskId,
+          wip_data: wipData,
+        }) as { success: boolean };
+
+        expect(result.success).toBe(true);
+
+        const task = db.getTask(taskId);
+        const parsedWip = JSON.parse(task!.work_in_progress!);
+        expect(parsedWip.test_results.passed).toBe(12);
+        expect(parsedWip.decisions[0].decision).toBe("JWT over sessions");
       });
     });
 

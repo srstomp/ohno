@@ -1234,6 +1234,152 @@ describe("TaskDatabase", () => {
     });
   });
 
+  describe("Work In Progress (WIP) Tracking", () => {
+    describe("updateTaskWip", () => {
+      it("should add WIP data to task with no existing WIP", () => {
+        const taskId = db.createTask({ title: "Task with WIP" });
+        const wipData = {
+          phase: "testing",
+          files_modified: ["src/auth.ts"],
+        };
+
+        const result = db.updateTaskWip(taskId, wipData);
+        expect(result).toBe(true);
+
+        const task = db.getTask(taskId);
+        expect(task?.work_in_progress).toBeDefined();
+        const parsedWip = JSON.parse(task!.work_in_progress!);
+        expect(parsedWip.phase).toBe("testing");
+        expect(parsedWip.files_modified).toEqual(["src/auth.ts"]);
+      });
+
+      it("should merge WIP data with existing WIP (shallow merge)", () => {
+        const taskId = db.createTask({ title: "Task with WIP merge" });
+
+        // First update
+        db.updateTaskWip(taskId, { phase: "implementation", files_modified: ["file1.ts"] });
+
+        // Second update - merge
+        db.updateTaskWip(taskId, { phase: "testing", next_step: "Run tests" });
+
+        const task = db.getTask(taskId);
+        const parsedWip = JSON.parse(task!.work_in_progress!);
+        expect(parsedWip.phase).toBe("testing"); // Overwritten
+        expect(parsedWip.files_modified).toEqual(["file1.ts"]); // Preserved
+        expect(parsedWip.next_step).toBe("Run tests"); // Added
+      });
+
+      it("should update wip_updated_at timestamp", () => {
+        const taskId = db.createTask({ title: "WIP timestamp test" });
+        db.updateTaskWip(taskId, { phase: "start" });
+
+        const task = db.getTask(taskId);
+        expect(task?.wip_updated_at).toBeDefined();
+        expect(new Date(task!.wip_updated_at!).getTime()).toBeGreaterThan(0);
+      });
+
+      it("should return false for non-existent task", () => {
+        const result = db.updateTaskWip("non-existent", { phase: "testing" });
+        expect(result).toBe(false);
+      });
+
+      it("should log activity when updating WIP", () => {
+        const taskId = db.createTask({ title: "WIP activity test" });
+        db.updateTaskWip(taskId, { phase: "testing" });
+
+        const activity = db.getTaskActivity(taskId);
+        const wipActivity = activity.find((a) => a.activity_type === "wip_update");
+        expect(wipActivity).toBeDefined();
+        expect(wipActivity?.description).toBe("Work in progress updated");
+      });
+
+      it("should handle complex nested WIP data", () => {
+        const taskId = db.createTask({ title: "Complex WIP" });
+        const wipData = {
+          phase: "testing",
+          files_modified: ["src/auth.ts", "src/types.ts"],
+          decisions: [
+            { decision: "JWT over sessions", reason: "Stateless" },
+          ],
+          test_results: {
+            ran: true,
+            passed: 12,
+            failed: 1,
+          },
+        };
+
+        db.updateTaskWip(taskId, wipData);
+
+        const task = db.getTask(taskId);
+        const parsedWip = JSON.parse(task!.work_in_progress!);
+        expect(parsedWip.test_results.passed).toBe(12);
+        expect(parsedWip.decisions[0].decision).toBe("JWT over sessions");
+      });
+
+      it("should handle invalid existing WIP JSON gracefully", () => {
+        const taskId = db.createTask({ title: "Invalid WIP" });
+
+        // Manually insert invalid JSON (edge case)
+        const dbInstance = db as unknown as { db: { run: (sql: string, params?: unknown[]) => void } };
+        dbInstance.db.run(
+          "UPDATE tasks SET work_in_progress = ? WHERE id = ?",
+          ["invalid json{", taskId]
+        );
+
+        // Should treat as empty object and continue
+        const result = db.updateTaskWip(taskId, { phase: "recovery" });
+        expect(result).toBe(true);
+
+        const task = db.getTask(taskId);
+        const parsedWip = JSON.parse(task!.work_in_progress!);
+        expect(parsedWip.phase).toBe("recovery");
+      });
+
+      it("should persist WIP data across database reloads", async () => {
+        const taskId = db.createTask({ title: "Persistent WIP" });
+        db.updateTaskWip(taskId, { phase: "testing", next_step: "Write tests" });
+
+        db.close();
+        db = await TaskDatabase.open(dbPath);
+
+        const task = db.getTask(taskId);
+        expect(task?.work_in_progress).toBeDefined();
+        const parsedWip = JSON.parse(task!.work_in_progress!);
+        expect(parsedWip.phase).toBe("testing");
+        expect(parsedWip.next_step).toBe("Write tests");
+      });
+
+      it("should accept actor parameter", () => {
+        const taskId = db.createTask({ title: "WIP with actor" });
+        db.updateTaskWip(taskId, { phase: "testing" }, "alice");
+
+        const activity = db.getTaskActivity(taskId);
+        const wipActivity = activity.find((a) => a.activity_type === "wip_update");
+        expect(wipActivity?.actor).toBe("alice");
+      });
+    });
+
+    describe("getTask with WIP fields", () => {
+      it("should return work_in_progress and wip_updated_at fields", () => {
+        const taskId = db.createTask({ title: "Task with WIP fields" });
+        db.updateTaskWip(taskId, { phase: "testing" });
+
+        const task = db.getTask(taskId);
+        expect(task?.work_in_progress).toBeDefined();
+        expect(task?.wip_updated_at).toBeDefined();
+      });
+
+      it("should return null WIP fields for task without WIP", () => {
+        const taskId = db.createTask({ title: "Task without WIP" });
+
+        const task = db.getTask(taskId);
+        // Fields are null in SQL when not set, not undefined
+        expect(task?.work_in_progress).toBeNull();
+        expect(task?.wip_updated_at).toBeNull();
+      });
+    });
+  });
+
   describe("Batch Retrieval", () => {
     describe("getNextBatch", () => {
       it("should return empty array when no tasks available", () => {

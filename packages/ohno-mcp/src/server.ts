@@ -109,6 +109,11 @@ const RecordFailureSchema = z.object({
   attempt: z.number().optional(),
 });
 
+const UpdateTaskWipSchema = z.object({
+  task_id: z.string().min(1),
+  wip_data: z.record(z.unknown()),
+});
+
 const CreateEpicSchema = z.object({
   title: z.string().min(1),
   project_id: z.string().optional(),
@@ -526,6 +531,18 @@ const TOOLS = [
       required: ["task_id", "failure_type", "reason"],
     },
   },
+  {
+    name: "update_task_wip",
+    description: "Update task work-in-progress metadata. Merges wip_data into existing WIP state.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        task_id: { type: "string", description: "Task ID" },
+        wip_data: { type: "object", description: "WIP data to merge into existing state", additionalProperties: true },
+      },
+      required: ["task_id", "wip_data"],
+    },
+  },
 ];
 
 // Export schemas for testing
@@ -554,6 +571,8 @@ export {
   RemoveDependencySchema,
   SummarizeSchema,
   RecordFailureSchema,
+  UpdateTaskWipSchema,
+  NeedsReworkSchema,
 };
 
 // Export tool definitions for testing
@@ -827,6 +846,15 @@ export async function handleTool(name: string, args: Record<string, unknown>): P
         parsed.attempt
       );
       return { success: true, failure_id: failureId };
+    }
+
+    case "update_task_wip": {
+      const parsed = UpdateTaskWipSchema.parse(args);
+      const success = database.updateTaskWip(parsed.task_id, parsed.wip_data as Record<string, unknown>);
+      if (!success) {
+        return { error: "Task not found" };
+      }
+      return { success: true };
     }
 
     default:

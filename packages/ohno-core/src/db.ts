@@ -1080,6 +1080,41 @@ export class TaskDatabase {
   }
 
   /**
+   * Update task work-in-progress metadata
+   * Merges wipData into existing work_in_progress (shallow merge)
+   */
+  updateTaskWip(taskId: string, wipData: Record<string, unknown>, actor?: string): boolean {
+    const task = this.getTask(taskId);
+    if (!task) {
+      return false;
+    }
+
+    // Merge with existing WIP
+    let existing: Record<string, unknown> = {};
+    if (task.work_in_progress) {
+      try {
+        existing = JSON.parse(task.work_in_progress);
+      } catch {
+        // Invalid JSON, treat as empty object
+        existing = {};
+      }
+    }
+    const merged = { ...existing, ...wipData };
+
+    const timestamp = getTimestamp();
+    const sql = `UPDATE tasks SET work_in_progress = ?, wip_updated_at = ?, updated_at = ? WHERE id = ?`;
+    this.db.run(sql, [JSON.stringify(merged), timestamp, timestamp, taskId]);
+    const changes = this.db.getRowsModified();
+
+    if (changes > 0) {
+      this.addTaskActivity(taskId, "wip_update", "Work in progress updated", actor);
+      this.save();
+    }
+
+    return changes > 0;
+  }
+
+  /**
    * Archive a task
    */
   archiveTask(taskId: string, reason?: string, actor?: string): boolean {
