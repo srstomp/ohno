@@ -172,6 +172,19 @@ const GetNextBatchSchema = z.object({
   batch_size: z.number().min(1).max(5).default(3),
 });
 
+const SetTaskHandoffSchema = z.object({
+  task_id: z.string().min(1).describe("Task ID"),
+  status: z.enum(["PASS", "FAIL", "BLOCKED"]).describe("Handoff status"),
+  summary: z.string().min(1).describe("2-3 sentence outcome summary"),
+  files_changed: z.array(z.string()).optional().describe("List of files changed"),
+  full_details: z.string().optional().describe("Complete output for debugging"),
+});
+
+const GetTaskHandoffSchema = z.object({
+  task_id: z.string().min(1).describe("Task ID"),
+  include_details: z.boolean().default(false).describe("Include full_details in response"),
+});
+
 // Tool definitions
 const TOOLS = [
   {
@@ -554,6 +567,33 @@ const TOOLS = [
       required: ["task_id", "wip_data"],
     },
   },
+  {
+    name: "set_task_handoff",
+    description: "Store task handoff data from a subagent. Returns minimal response (status + summary only).",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        task_id: { type: "string", description: "Task ID" },
+        status: { type: "string", enum: ["PASS", "FAIL", "BLOCKED"], description: "Handoff status" },
+        summary: { type: "string", description: "2-3 sentence outcome summary" },
+        files_changed: { type: "array", items: { type: "string" }, description: "List of files changed" },
+        full_details: { type: "string", description: "Complete output for debugging" },
+      },
+      required: ["task_id", "status", "summary"],
+    },
+  },
+  {
+    name: "get_task_handoff",
+    description: "Retrieve task handoff data. Returns summary by default; set include_details=true for full output.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        task_id: { type: "string", description: "Task ID" },
+        include_details: { type: "boolean", description: "Include full_details in response", default: false },
+      },
+      required: ["task_id"],
+    },
+  },
 ];
 
 // Export schemas for testing
@@ -584,6 +624,8 @@ export {
   RecordFailureSchema,
   UpdateTaskWipSchema,
   NeedsReworkSchema,
+  SetTaskHandoffSchema,
+  GetTaskHandoffSchema,
 };
 
 // Export tool definitions for testing
@@ -866,6 +908,31 @@ export async function handleTool(name: string, args: Record<string, unknown>): P
         return { error: "Task not found" };
       }
       return { success: true };
+    }
+
+    case "set_task_handoff": {
+      const parsed = SetTaskHandoffSchema.parse(args);
+      const success = database.setTaskHandoff(
+        parsed.task_id,
+        parsed.status,
+        parsed.summary,
+        parsed.files_changed,
+        parsed.full_details
+      );
+      if (!success) {
+        return { error: "Failed to set handoff" };
+      }
+      // Return MINIMAL response - just status + summary, NOT full_details
+      return { status: parsed.status, summary: parsed.summary };
+    }
+
+    case "get_task_handoff": {
+      const parsed = GetTaskHandoffSchema.parse(args);
+      const handoff = database.getTaskHandoff(parsed.task_id, parsed.include_details);
+      if (!handoff) {
+        return { error: "Handoff not found" };
+      }
+      return handoff;
     }
 
     default:

@@ -23,6 +23,9 @@ export type DependencyType = "blocks" | "requires" | "relates_to";
 // Failure type enum
 export type FailureType = "spec" | "quality" | "implementation";
 
+// Handoff status enum
+export type HandoffStatus = "PASS" | "FAIL" | "BLOCKED";
+
 // Field set for get_tasks response size control
 export type FieldSet = "minimal" | "standard" | "full";
 
@@ -100,6 +103,19 @@ export interface TaskFailure {
   failure_reason: string;
   attempt?: number;
   created_at?: string;
+}
+
+/**
+ * Task handoff record for storing subagent results
+ */
+export interface TaskHandoff {
+  task_id: string;
+  status: HandoffStatus;
+  summary: string;
+  files_changed?: string[];
+  full_details?: string;
+  created_at?: string;
+  compacted_at?: string;
 }
 
 /**

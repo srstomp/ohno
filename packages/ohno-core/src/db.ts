@@ -13,6 +13,7 @@ import type {
   TaskActivity,
   TaskDependency,
   TaskFailure,
+  TaskHandoff,
   BatchTask,
   ProjectStatus,
   SessionContext,
@@ -31,6 +32,7 @@ import type {
   Epic,
   Story,
   FieldSet,
+  HandoffStatus,
 } from "./types.js";
 import {
   generateTaskId,
@@ -51,6 +53,7 @@ import {
   CREATE_TASK_FILES_TABLE,
   CREATE_TASK_DEPENDENCIES_TABLE,
   CREATE_TASK_FAILURES_TABLE,
+  CREATE_TASK_HANDOFFS_TABLE,
   CREATE_INDEXES,
   EXTENDED_TASK_COLUMNS,
   GET_TASK_BY_ID,
@@ -153,6 +156,7 @@ export class TaskDatabase {
     this.db.run(CREATE_TASK_FILES_TABLE);
     this.db.run(CREATE_TASK_DEPENDENCIES_TABLE);
     this.db.run(CREATE_TASK_FAILURES_TABLE);
+    this.db.run(CREATE_TASK_HANDOFFS_TABLE);
 
     // Add extended columns if missing (backwards compatibility)
     for (const [colName, colType] of EXTENDED_TASK_COLUMNS) {
@@ -1428,5 +1432,67 @@ export class TaskDatabase {
     stmt.free();
 
     return rows;
+  }
+
+  // ==========================================================================
+  // Task Handoff Methods
+  // ==========================================================================
+
+  /**
+   * Set task handoff data (upsert)
+   * Stores handoff information from subagent execution
+   */
+  setTaskHandoff(
+    taskId: string,
+    status: string,
+    summary: string,
+    filesChanged?: string[],
+    fullDetails?: string
+  ): boolean {
+    const timestamp = getTimestamp();
+    const sql = `
+      INSERT OR REPLACE INTO task_handoffs (task_id, status, summary, files_changed, full_details, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `;
+    this.db.run(sql, [
+      taskId,
+      status,
+      summary,
+      filesChanged ? JSON.stringify(filesChanged) : null,
+      fullDetails ?? null,
+      timestamp,
+    ]);
+    const changes = this.db.getRowsModified();
+    if (changes > 0) {
+      this.save();
+    }
+    return changes > 0;
+  }
+
+  /**
+   * Get task handoff data
+   * Returns summary by default; includes full_details only when includeDetails=true
+   */
+  getTaskHandoff(taskId: string, includeDetails: boolean = false): TaskHandoff | null {
+    const sql = includeDetails
+      ? `SELECT * FROM task_handoffs WHERE task_id = ?`
+      : `SELECT task_id, status, summary, files_changed, created_at, compacted_at FROM task_handoffs WHERE task_id = ?`;
+    const stmt = this.db.prepare(sql);
+    stmt.bind([taskId]);
+    if (stmt.step()) {
+      const row = stmt.getAsObject();
+      stmt.free();
+      return {
+        task_id: row.task_id as string,
+        status: row.status as HandoffStatus,
+        summary: row.summary as string,
+        files_changed: row.files_changed ? JSON.parse(row.files_changed as string) : undefined,
+        full_details: includeDetails ? (row.full_details as string ?? undefined) : undefined,
+        created_at: row.created_at as string ?? undefined,
+        compacted_at: row.compacted_at as string ?? undefined,
+      };
+    }
+    stmt.free();
+    return null;
   }
 }
