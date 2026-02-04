@@ -879,5 +879,58 @@ export function createCli(): Command {
       }
     });
 
+  program
+    .command("set-handoff <task-id> <status> <summary>")
+    .description("Store task handoff data (for subagent reporting)")
+    .option("--files <json-array>", "JSON array of changed files")
+    .option("--details <text>", "Full details text")
+    .action(async (taskId, status, summary, options, command) => {
+      const globalOpts = command.parent?.opts() ?? {};
+      const db = await getDb(globalOpts.dir);
+
+      // Verify task exists
+      const task = db.getTask(taskId);
+      if (!task) {
+        db.close();
+        if (globalOpts.json) {
+          out.json({ success: false, error: "Task not found" });
+        } else {
+          out.error("Task not found", taskId);
+        }
+        process.exit(1);
+      }
+
+      // Parse files if provided
+      let filesChanged: string[] | undefined;
+      if (options.files) {
+        try {
+          filesChanged = JSON.parse(options.files);
+          if (!Array.isArray(filesChanged)) {
+            throw new Error("Files must be a JSON array");
+          }
+        } catch (e) {
+          db.close();
+          if (globalOpts.json) {
+            out.json({ success: false, error: e instanceof Error ? e.message : "Invalid JSON for files" });
+          } else {
+            out.error("Invalid files JSON", e instanceof Error ? e.message : "Invalid JSON");
+          }
+          process.exit(1);
+        }
+      }
+
+      const success = db.setTaskHandoff(taskId, status, summary, filesChanged, options.details);
+      db.close();
+
+      if (globalOpts.json) {
+        out.json({ success, task_id: taskId });
+      } else if (success) {
+        out.success(`Stored handoff for task ${taskId}`);
+      } else {
+        out.error("Failed to store handoff", taskId);
+        process.exit(1);
+      }
+    });
+
   return program;
 }
