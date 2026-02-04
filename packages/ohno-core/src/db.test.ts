@@ -1711,4 +1711,234 @@ describe("TaskDatabase", () => {
       });
     });
   });
+
+  describe("Memory Decay", () => {
+    describe("compactStoryHandoffs", () => {
+      it("should compact handoffs for all tasks in a completed story", () => {
+        const storyId = db.createStory({ title: "Test story" });
+        const task1 = db.createTask({ title: "Task 1", story_id: storyId });
+        const task2 = db.createTask({ title: "Task 2", story_id: storyId });
+
+        // Set handoffs with full details
+        db.setTaskHandoff(task1, "PASS", "Task 1 completed successfully", ["file1.ts"], "Full details for task 1");
+        db.setTaskHandoff(task2, "PASS", "Task 2 completed successfully", ["file2.ts"], "Full details for task 2");
+
+        // Compact handoffs
+        const count = db.compactStoryHandoffs(storyId);
+        expect(count).toBe(2);
+
+        // Verify full_details is removed but summary remains
+        const handoff1 = db.getTaskHandoff(task1, true);
+        const handoff2 = db.getTaskHandoff(task2, true);
+
+        expect(handoff1?.summary).toBe("Task 1 completed successfully");
+        expect(handoff1?.full_details).toBeNull();
+        expect(handoff1?.compacted_at).toBeDefined();
+
+        expect(handoff2?.summary).toBe("Task 2 completed successfully");
+        expect(handoff2?.full_details).toBeNull();
+        expect(handoff2?.compacted_at).toBeDefined();
+      });
+
+      it("should skip tasks with status=blocked", () => {
+        const storyId = db.createStory({ title: "Test story" });
+        const task1 = db.createTask({ title: "Task 1", story_id: storyId });
+        const task2 = db.createTask({ title: "Task 2", story_id: storyId });
+
+        db.setTaskHandoff(task1, "PASS", "Task 1 completed", ["file1.ts"], "Full details");
+        db.setTaskHandoff(task2, "PASS", "Task 2 completed", ["file2.ts"], "Full details");
+
+        // Block task2
+        db.setBlocker(task2, "Waiting for API");
+
+        const count = db.compactStoryHandoffs(storyId);
+        expect(count).toBe(1); // Only task1 compacted
+
+        // Verify task2 handoff NOT compacted
+        const handoff2 = db.getTaskHandoff(task2, true);
+        expect(handoff2?.full_details).toBe("Full details");
+        expect(handoff2?.compacted_at).toBeNull();
+      });
+
+      it("should skip handoffs with status=FAIL", () => {
+        const storyId = db.createStory({ title: "Test story" });
+        const task1 = db.createTask({ title: "Task 1", story_id: storyId });
+        const task2 = db.createTask({ title: "Task 2", story_id: storyId });
+
+        db.setTaskHandoff(task1, "PASS", "Task 1 completed", ["file1.ts"], "Full details");
+        db.setTaskHandoff(task2, "FAIL", "Task 2 failed", ["file2.ts"], "Full failure details");
+
+        const count = db.compactStoryHandoffs(storyId);
+        expect(count).toBe(1); // Only task1 compacted
+
+        // Verify task2 handoff NOT compacted
+        const handoff2 = db.getTaskHandoff(task2, true);
+        expect(handoff2?.full_details).toBe("Full failure details");
+        expect(handoff2?.compacted_at).toBeNull();
+      });
+
+      it("should skip handoffs with status=BLOCKED", () => {
+        const storyId = db.createStory({ title: "Test story" });
+        const task1 = db.createTask({ title: "Task 1", story_id: storyId });
+        const task2 = db.createTask({ title: "Task 2", story_id: storyId });
+
+        db.setTaskHandoff(task1, "PASS", "Task 1 completed", ["file1.ts"], "Full details");
+        db.setTaskHandoff(task2, "BLOCKED", "Task 2 blocked", ["file2.ts"], "Full blocker details");
+
+        const count = db.compactStoryHandoffs(storyId);
+        expect(count).toBe(1);
+
+        const handoff2 = db.getTaskHandoff(task2, true);
+        expect(handoff2?.full_details).toBe("Full blocker details");
+        expect(handoff2?.compacted_at).toBeNull();
+      });
+
+      it("should return 0 when story has no tasks", () => {
+        const storyId = db.createStory({ title: "Empty story" });
+        const count = db.compactStoryHandoffs(storyId);
+        expect(count).toBe(0);
+      });
+
+      it("should return 0 when tasks have no handoffs", () => {
+        const storyId = db.createStory({ title: "Test story" });
+        db.createTask({ title: "Task 1", story_id: storyId });
+        db.createTask({ title: "Task 2", story_id: storyId });
+
+        const count = db.compactStoryHandoffs(storyId);
+        expect(count).toBe(0);
+      });
+
+      it("should be idempotent (running twice doesn't break)", () => {
+        const storyId = db.createStory({ title: "Test story" });
+        const task1 = db.createTask({ title: "Task 1", story_id: storyId });
+
+        db.setTaskHandoff(task1, "PASS", "Task completed", ["file1.ts"], "Full details");
+
+        const count1 = db.compactStoryHandoffs(storyId);
+        expect(count1).toBe(1);
+
+        const count2 = db.compactStoryHandoffs(storyId);
+        expect(count2).toBe(0); // Already compacted
+
+        const handoff = db.getTaskHandoff(task1, true);
+        expect(handoff?.full_details).toBeNull();
+      });
+    });
+
+    describe("deleteEpicHandoffs", () => {
+      it("should delete handoffs for all tasks in all stories of an epic", () => {
+        const epicId = db.createEpic({ title: "Test epic" });
+        const story1 = db.createStory({ title: "Story 1", epic_id: epicId });
+        const story2 = db.createStory({ title: "Story 2", epic_id: epicId });
+
+        const task1 = db.createTask({ title: "Task 1", story_id: story1 });
+        const task2 = db.createTask({ title: "Task 2", story_id: story1 });
+        const task3 = db.createTask({ title: "Task 3", story_id: story2 });
+
+        db.setTaskHandoff(task1, "PASS", "Task 1 completed", ["file1.ts"], "Full details 1");
+        db.setTaskHandoff(task2, "PASS", "Task 2 completed", ["file2.ts"], "Full details 2");
+        db.setTaskHandoff(task3, "PASS", "Task 3 completed", ["file3.ts"], "Full details 3");
+
+        const count = db.deleteEpicHandoffs(epicId);
+        expect(count).toBe(3);
+
+        // Verify all handoffs are deleted
+        expect(db.getTaskHandoff(task1)).toBeNull();
+        expect(db.getTaskHandoff(task2)).toBeNull();
+        expect(db.getTaskHandoff(task3)).toBeNull();
+      });
+
+      it("should skip tasks with status=blocked", () => {
+        const epicId = db.createEpic({ title: "Test epic" });
+        const storyId = db.createStory({ title: "Story", epic_id: epicId });
+
+        const task1 = db.createTask({ title: "Task 1", story_id: storyId });
+        const task2 = db.createTask({ title: "Task 2", story_id: storyId });
+
+        db.setTaskHandoff(task1, "PASS", "Task 1 completed", ["file1.ts"], "Full details 1");
+        db.setTaskHandoff(task2, "PASS", "Task 2 completed", ["file2.ts"], "Full details 2");
+
+        db.setBlocker(task2, "Waiting for review");
+
+        const count = db.deleteEpicHandoffs(epicId);
+        expect(count).toBe(1); // Only task1 deleted
+
+        expect(db.getTaskHandoff(task1)).toBeNull();
+        expect(db.getTaskHandoff(task2)).toBeDefined();
+      });
+
+      it("should skip handoffs with status=FAIL", () => {
+        const epicId = db.createEpic({ title: "Test epic" });
+        const storyId = db.createStory({ title: "Story", epic_id: epicId });
+
+        const task1 = db.createTask({ title: "Task 1", story_id: storyId });
+        const task2 = db.createTask({ title: "Task 2", story_id: storyId });
+
+        db.setTaskHandoff(task1, "PASS", "Task 1 completed", ["file1.ts"], "Full details 1");
+        db.setTaskHandoff(task2, "FAIL", "Task 2 failed", ["file2.ts"], "Full failure details");
+
+        const count = db.deleteEpicHandoffs(epicId);
+        expect(count).toBe(1);
+
+        expect(db.getTaskHandoff(task1)).toBeNull();
+        expect(db.getTaskHandoff(task2)).toBeDefined();
+      });
+
+      it("should skip handoffs with status=BLOCKED", () => {
+        const epicId = db.createEpic({ title: "Test epic" });
+        const storyId = db.createStory({ title: "Story", epic_id: epicId });
+
+        const task1 = db.createTask({ title: "Task 1", story_id: storyId });
+        const task2 = db.createTask({ title: "Task 2", story_id: storyId });
+
+        db.setTaskHandoff(task1, "PASS", "Task 1 completed", ["file1.ts"], "Full details 1");
+        db.setTaskHandoff(task2, "BLOCKED", "Task 2 blocked", ["file2.ts"], "Full blocker details");
+
+        const count = db.deleteEpicHandoffs(epicId);
+        expect(count).toBe(1);
+
+        expect(db.getTaskHandoff(task1)).toBeNull();
+        expect(db.getTaskHandoff(task2)).toBeDefined();
+      });
+
+      it("should return 0 when epic has no stories", () => {
+        const epicId = db.createEpic({ title: "Empty epic" });
+        const count = db.deleteEpicHandoffs(epicId);
+        expect(count).toBe(0);
+      });
+
+      it("should return 0 when stories have no tasks", () => {
+        const epicId = db.createEpic({ title: "Test epic" });
+        db.createStory({ title: "Empty story", epic_id: epicId });
+
+        const count = db.deleteEpicHandoffs(epicId);
+        expect(count).toBe(0);
+      });
+
+      it("should return 0 when tasks have no handoffs", () => {
+        const epicId = db.createEpic({ title: "Test epic" });
+        const storyId = db.createStory({ title: "Story", epic_id: epicId });
+        db.createTask({ title: "Task", story_id: storyId });
+
+        const count = db.deleteEpicHandoffs(epicId);
+        expect(count).toBe(0);
+      });
+
+      it("should be idempotent (running twice doesn't break)", () => {
+        const epicId = db.createEpic({ title: "Test epic" });
+        const storyId = db.createStory({ title: "Story", epic_id: epicId });
+        const task1 = db.createTask({ title: "Task 1", story_id: storyId });
+
+        db.setTaskHandoff(task1, "PASS", "Task completed", ["file1.ts"], "Full details");
+
+        const count1 = db.deleteEpicHandoffs(epicId);
+        expect(count1).toBe(1);
+
+        const count2 = db.deleteEpicHandoffs(epicId);
+        expect(count2).toBe(0); // Already deleted
+
+        expect(db.getTaskHandoff(task1)).toBeNull();
+      });
+    });
+  });
 });

@@ -837,5 +837,47 @@ export function createCli(): Command {
       }
     });
 
+  program
+    .command("compact-handoffs <story-id>")
+    .description("Compact handoffs for a completed story (for hook automation)")
+    .action(async (storyId, options, command) => {
+      const globalOpts = command.parent?.opts() ?? {};
+      const db = await getDb(globalOpts.dir);
+
+      const count = db.compactStoryHandoffs(storyId);
+      db.close();
+
+      if (globalOpts.json) {
+        out.json({ compacted: count, story_id: storyId });
+      } else if (!options.quiet) {
+        if (count > 0) {
+          out.success(`Compacted ${count} handoff(s) for story ${storyId}`);
+        } else {
+          out.print(colors.dim(`No handoffs to compact for story ${storyId}`));
+        }
+      }
+    });
+
+  program
+    .command("delete-handoffs <epic-id>")
+    .description("Delete handoffs for a completed epic (for hook automation)")
+    .action(async (epicId, options, command) => {
+      const globalOpts = command.parent?.opts() ?? {};
+      const db = await getDb(globalOpts.dir);
+
+      const count = db.deleteEpicHandoffs(epicId);
+      db.close();
+
+      if (globalOpts.json) {
+        out.json({ deleted: count, epic_id: epicId });
+      } else if (!options.quiet) {
+        if (count > 0) {
+          out.success(`Deleted ${count} handoff(s) for epic ${epicId}`);
+        } else {
+          out.print(colors.dim(`No handoffs to delete for epic ${epicId}`));
+        }
+      }
+    });
+
   return program;
 }

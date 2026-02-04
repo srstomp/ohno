@@ -133,7 +133,7 @@ describe("TaskHandoffs", () => {
 
       const handoff = db.getTaskHandoff(taskId, true);
       expect(handoff?.summary).toBe("Minimal handoff");
-      expect(handoff?.full_details).toBeUndefined();
+      expect(handoff?.full_details).toBeNull();
     });
 
     it("should correctly parse files_changed JSON", () => {
@@ -158,7 +158,7 @@ describe("TaskHandoffs", () => {
       db.setTaskHandoff(taskId, "PASS", "Not compacted yet");
 
       const handoff = db.getTaskHandoff(taskId, true);
-      expect(handoff?.compacted_at).toBeUndefined();
+      expect(handoff?.compacted_at).toBeNull();
     });
   });
 });

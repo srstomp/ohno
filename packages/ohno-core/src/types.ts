@@ -113,9 +113,9 @@ export interface TaskHandoff {
   status: HandoffStatus;
   summary: string;
   files_changed?: string[];
-  full_details?: string;
+  full_details?: string | null;
   created_at?: string;
-  compacted_at?: string;
+  compacted_at?: string | null;
 }
 
 /**
