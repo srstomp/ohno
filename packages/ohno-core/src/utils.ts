@@ -59,6 +59,18 @@ export function generateEpicId(title: string, projectId: string | null, timestam
 }
 
 /**
+ * Generate a unique failure ID
+ * Format: fail-{sha256[:8]}
+ * Includes random component to avoid collisions
+ */
+export function generateFailureId(taskId: string, failureType: string, timestamp: string): string {
+  const random = crypto.randomBytes(4).toString("hex");
+  const content = `${taskId}|${failureType}|${timestamp}|${random}`;
+  const hash = crypto.createHash("sha256").update(content).digest("hex");
+  return `fail-${hash.slice(0, 8)}`;
+}
+
+/**
  * Get current ISO timestamp
  */
 export function getTimestamp(): string {
