@@ -84,12 +84,89 @@ describe("TaskDatabase", () => {
         expect(task).toBeNull();
       });
 
-      it("should return task with all fields", () => {
+      it("should return task with all fields by default", () => {
         const taskId = db.createTask({ title: "Get me" });
         const task = db.getTask(taskId);
         expect(task).toBeDefined();
         expect(task?.id).toBe(taskId);
         expect(task?.title).toBe("Get me");
+      });
+
+      describe("field selection", () => {
+        it("should return minimal fields when requested", () => {
+          const taskId = db.createTask({
+            title: "Minimal task",
+            description: "Long description",
+            task_type: "feature",
+          });
+          db.setHandoffNotes(taskId, "Handoff notes here");
+
+          const task = db.getTask(taskId, "minimal");
+          expect(task).toBeDefined();
+          expect(task?.id).toBe(taskId);
+          expect(task?.title).toBe("Minimal task");
+          expect(task?.status).toBe("todo");
+          expect(task?.task_type).toBe("feature");
+          // Minimal should NOT include description or handoff_notes
+          expect(task?.description).toBeUndefined();
+          expect(task?.handoff_notes).toBeUndefined();
+        });
+
+        it("should return standard fields when requested", () => {
+          const taskId = db.createTask({
+            title: "Standard task",
+            description: "Task description",
+            task_type: "bug",
+            estimate_hours: 5,
+          });
+          db.setHandoffNotes(taskId, "Handoff notes");
+          db.updateTaskWip(taskId, { content: "Work in progress" });
+
+          const task = db.getTask(taskId, "standard");
+          expect(task).toBeDefined();
+          expect(task?.id).toBe(taskId);
+          expect(task?.title).toBe("Standard task");
+          expect(task?.description).toBe("Task description");
+          expect(task?.handoff_notes).toBe("Handoff notes");
+          expect(task?.estimate_hours).toBe(5);
+          // Standard should NOT include work_in_progress
+          expect(task?.work_in_progress).toBeUndefined();
+        });
+
+        it("should return full fields when requested", () => {
+          const taskId = db.createTask({
+            title: "Full task",
+            description: "Full description",
+            task_type: "feature",
+          });
+          db.updateTaskWip(taskId, { content: "WIP content" });
+          db.setHandoffNotes(taskId, "Handoff");
+
+          const task = db.getTask(taskId, "full");
+          expect(task).toBeDefined();
+          expect(task?.id).toBe(taskId);
+          expect(task?.title).toBe("Full task");
+          expect(task?.description).toBe("Full description");
+          expect(task?.handoff_notes).toBe("Handoff");
+          expect(task?.work_in_progress).toBeDefined();
+          const wipParsed = JSON.parse(task!.work_in_progress!);
+          expect(wipParsed.content).toBe("WIP content");
+          // Full should include all fields
+          expect(task?.created_at).toBeDefined();
+          expect(task?.updated_at).toBeDefined();
+        });
+
+        it("should default to standard for single task", () => {
+          const taskId = db.createTask({
+            title: "Default task",
+            description: "Should see this",
+          });
+
+          const task = db.getTask(taskId);
+          expect(task).toBeDefined();
+          // Should include standard fields
+          expect(task?.description).toBe("Should see this");
+        });
       });
     });
 
@@ -295,7 +372,7 @@ describe("TaskDatabase", () => {
         const taskId = db.createTask({ title: "Context task" });
         db.updateTaskProgress(taskId, 75, "Almost done");
 
-        const task = db.getTask(taskId);
+        const task = db.getTask(taskId, "full");
         expect(task?.context_summary).toBe("Almost done");
       });
 
@@ -1246,7 +1323,7 @@ describe("TaskDatabase", () => {
         const result = db.updateTaskWip(taskId, wipData);
         expect(result).toBe(true);
 
-        const task = db.getTask(taskId);
+        const task = db.getTask(taskId, "full");
         expect(task?.work_in_progress).toBeDefined();
         const parsedWip = JSON.parse(task!.work_in_progress!);
         expect(parsedWip.phase).toBe("testing");
@@ -1262,7 +1339,7 @@ describe("TaskDatabase", () => {
         // Second update - merge
         db.updateTaskWip(taskId, { phase: "testing", next_step: "Run tests" });
 
-        const task = db.getTask(taskId);
+        const task = db.getTask(taskId, "full");
         const parsedWip = JSON.parse(task!.work_in_progress!);
         expect(parsedWip.phase).toBe("testing"); // Overwritten
         expect(parsedWip.files_modified).toEqual(["file1.ts"]); // Preserved
@@ -1273,7 +1350,7 @@ describe("TaskDatabase", () => {
         const taskId = db.createTask({ title: "WIP timestamp test" });
         db.updateTaskWip(taskId, { phase: "start" });
 
-        const task = db.getTask(taskId);
+        const task = db.getTask(taskId, "full");
         expect(task?.wip_updated_at).toBeDefined();
         expect(new Date(task!.wip_updated_at!).getTime()).toBeGreaterThan(0);
       });
@@ -1310,7 +1387,7 @@ describe("TaskDatabase", () => {
 
         db.updateTaskWip(taskId, wipData);
 
-        const task = db.getTask(taskId);
+        const task = db.getTask(taskId, "full");
         const parsedWip = JSON.parse(task!.work_in_progress!);
         expect(parsedWip.test_results.passed).toBe(12);
         expect(parsedWip.decisions[0].decision).toBe("JWT over sessions");
@@ -1330,7 +1407,7 @@ describe("TaskDatabase", () => {
         const result = db.updateTaskWip(taskId, { phase: "recovery" });
         expect(result).toBe(true);
 
-        const task = db.getTask(taskId);
+        const task = db.getTask(taskId, "full");
         const parsedWip = JSON.parse(task!.work_in_progress!);
         expect(parsedWip.phase).toBe("recovery");
       });
@@ -1342,7 +1419,7 @@ describe("TaskDatabase", () => {
         db.close();
         db = await TaskDatabase.open(dbPath);
 
-        const task = db.getTask(taskId);
+        const task = db.getTask(taskId, "full");
         expect(task?.work_in_progress).toBeDefined();
         const parsedWip = JSON.parse(task!.work_in_progress!);
         expect(parsedWip.phase).toBe("testing");
@@ -1360,19 +1437,19 @@ describe("TaskDatabase", () => {
     });
 
     describe("getTask with WIP fields", () => {
-      it("should return work_in_progress and wip_updated_at fields", () => {
+      it("should return work_in_progress and wip_updated_at fields when using full mode", () => {
         const taskId = db.createTask({ title: "Task with WIP fields" });
         db.updateTaskWip(taskId, { phase: "testing" });
 
-        const task = db.getTask(taskId);
+        const task = db.getTask(taskId, "full");
         expect(task?.work_in_progress).toBeDefined();
         expect(task?.wip_updated_at).toBeDefined();
       });
 
-      it("should return null WIP fields for task without WIP", () => {
+      it("should return null WIP fields for task without WIP when using full mode", () => {
         const taskId = db.createTask({ title: "Task without WIP" });
 
-        const task = db.getTask(taskId);
+        const task = db.getTask(taskId, "full");
         // Fields are null in SQL when not set, not undefined
         expect(task?.work_in_progress).toBeNull();
         expect(task?.wip_updated_at).toBeNull();
