@@ -939,6 +939,28 @@ describe("CLI Commands", () => {
         ])
       ).rejects.toThrow();
     });
+
+    it("should fail with invalid JSON in --files", async () => {
+      const taskId = db.createTask({ title: "Test task" });
+      const program = createCli();
+      program.exitOverride();
+
+      await expect(
+        program.parseAsync([
+          "node",
+          "test",
+          "--json",
+          "-d",
+          tempDir,
+          "set-handoff",
+          taskId,
+          "PASS",
+          "Summary",
+          "--files",
+          '["invalid json',
+        ])
+      ).rejects.toThrow();
+    });
   });
 
   describe("kanban command", () => {
