@@ -101,6 +101,14 @@ export interface TaskFailure {
 }
 
 /**
+ * Task with failure context attached
+ * Used for batch retrieval of tasks ready for execution
+ */
+export interface BatchTask extends Task {
+  failure_context?: TaskFailure[];
+}
+
+/**
  * Aggregated project statistics
  */
 export interface ProjectStatus {

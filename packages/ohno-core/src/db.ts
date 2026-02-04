@@ -13,6 +13,7 @@ import type {
   TaskActivity,
   TaskDependency,
   TaskFailure,
+  BatchTask,
   ProjectStatus,
   SessionContext,
   CreateTaskOptions,
@@ -344,6 +345,51 @@ export class TaskDatabase {
     // Sort by priority and return first
     const sorted = sortByPriority(availableTasks);
     return sorted[0];
+  }
+
+  /**
+   * Get next batch of tasks ready for execution
+   * Returns up to N tasks that are either todo or need rework, have no unmet dependencies,
+   * ordered by epic priority then creation date
+   *
+   * @param size - Number of tasks to return (default 3, max 5)
+   * @returns Array of BatchTask with failure_context attached for tasks needing rework
+   */
+  getNextBatch(size: number = 3): BatchTask[] {
+    const maxSize = Math.min(size, 5);
+
+    // Get candidates: todo OR needs_rework
+    const sql = `
+      SELECT t.*, e.priority as epic_priority
+      FROM tasks t
+      LEFT JOIN stories s ON t.story_id = s.id
+      LEFT JOIN epics e ON s.epic_id = e.id
+      WHERE (t.status = 'todo' OR t.needs_rework = 1)
+        AND t.status != 'archived'
+      ORDER BY
+        CASE e.priority
+          WHEN 'P0' THEN 0
+          WHEN 'P1' THEN 1
+          WHEN 'P2' THEN 2
+          ELSE 3
+        END,
+        t.created_at ASC
+    `;
+
+    const result = this.db.exec(sql);
+    const candidates = resultToObjects<Task>(result);
+
+    // Filter out blocked tasks
+    const available = candidates.filter((task) => !this.isTaskBlockedByDependencies(task.id));
+
+    // Take up to maxSize
+    const batch = available.slice(0, maxSize);
+
+    // Attach failure context for needs_rework tasks
+    return batch.map((task) => ({
+      ...task,
+      failure_context: task.needs_rework ? this.getTaskFailures(task.id) : undefined,
+    }));
   }
 
   /**
