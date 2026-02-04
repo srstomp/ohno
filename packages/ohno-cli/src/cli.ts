@@ -803,5 +803,39 @@ export function createCli(): Command {
       }
     });
 
+  program
+    .command("update-wip <task-id> <wip-data>")
+    .description("Update task work-in-progress metadata (for hook automation)")
+    .action(async (taskId, wipDataJson, options, command) => {
+      const globalOpts = command.parent?.opts() ?? {};
+      const db = await getDb(globalOpts.dir);
+
+      try {
+        const wipData = JSON.parse(wipDataJson);
+        const success = db.updateTaskWip(taskId, wipData);
+        db.close();
+
+        if (globalOpts.json) {
+          out.json({ success, taskId });
+        }
+
+        if (!success) {
+          if (!globalOpts.json) {
+            out.error(`Failed to update WIP for task ${taskId}`);
+          }
+          process.exit(1);
+        }
+        // Silent on success (for hook background operation)
+      } catch (e) {
+        db.close();
+        if (globalOpts.json) {
+          out.json({ success: false, error: e instanceof Error ? e.message : "Invalid JSON" });
+        } else {
+          out.error("Invalid WIP data", e instanceof Error ? e.message : "Invalid JSON");
+        }
+        process.exit(1);
+      }
+    });
+
   return program;
 }

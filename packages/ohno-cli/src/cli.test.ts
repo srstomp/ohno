@@ -237,6 +237,7 @@ describe("CLI Commands", () => {
       expect(commands).toContain("serve");
       expect(commands).toContain("sync");
       expect(commands).toContain("dep");
+      expect(commands).toContain("update-wip");
     });
 
     it("should support --json option", () => {
@@ -603,6 +604,109 @@ describe("CLI Commands", () => {
       await db.reload();
       const task = db.getTask(taskId);
       expect(task?.status).toBe("in_progress");
+    });
+  });
+
+  describe("update-wip command", () => {
+    it("should update task WIP with file modifications", async () => {
+      const taskId = db.createTask({ title: "Test task" });
+
+      const program = createCli();
+      program.exitOverride();
+
+      const wipData = JSON.stringify({
+        files_modified: ["src/auth.ts", "src/db.ts"],
+        uncommitted_changes: true
+      });
+
+      await program.parseAsync(["node", "test", "--json", "-d", tempDir, "update-wip", taskId, wipData]);
+
+      const output = getConsoleOutput(consoleLogSpy);
+      const parsed = JSON.parse(output);
+      expect(parsed.success).toBe(true);
+
+      // Reload to see changes made by CLI
+      await db.reload();
+      const task = db.getTask(taskId, "full");
+      expect(task?.work_in_progress).toBeDefined();
+
+      const wip = JSON.parse(task?.work_in_progress || "{}");
+      expect(wip.files_modified).toEqual(["src/auth.ts", "src/db.ts"]);
+      expect(wip.uncommitted_changes).toBe(true);
+    });
+
+    it("should update task WIP with test results", async () => {
+      const taskId = db.createTask({ title: "Test task" });
+
+      const program = createCli();
+      program.exitOverride();
+
+      const wipData = JSON.stringify({
+        test_results: { ran: true, passed: 12, failed: 1 }
+      });
+
+      await program.parseAsync(["node", "test", "--json", "-d", tempDir, "update-wip", taskId, wipData]);
+
+      const output = getConsoleOutput(consoleLogSpy);
+      const parsed = JSON.parse(output);
+      expect(parsed.success).toBe(true);
+
+      // Reload to see changes made by CLI
+      await db.reload();
+      const task = db.getTask(taskId, "full");
+      expect(task?.work_in_progress).toBeDefined();
+
+      const wip = JSON.parse(task?.work_in_progress || "{}");
+      expect(wip.test_results).toEqual({ ran: true, passed: 12, failed: 1 });
+    });
+
+    it("should update task WIP with commit hash", async () => {
+      const taskId = db.createTask({ title: "Test task" });
+
+      const program = createCli();
+      program.exitOverride();
+
+      const wipData = JSON.stringify({
+        last_commit: "abc1234",
+        uncommitted_changes: false
+      });
+
+      await program.parseAsync(["node", "test", "--json", "-d", tempDir, "update-wip", taskId, wipData]);
+
+      const output = getConsoleOutput(consoleLogSpy);
+      const parsed = JSON.parse(output);
+      expect(parsed.success).toBe(true);
+
+      // Reload to see changes made by CLI
+      await db.reload();
+      const task = db.getTask(taskId, "full");
+      expect(task?.work_in_progress).toBeDefined();
+
+      const wip = JSON.parse(task?.work_in_progress || "{}");
+      expect(wip.last_commit).toBe("abc1234");
+      expect(wip.uncommitted_changes).toBe(false);
+    });
+
+    it("should handle invalid JSON gracefully", async () => {
+      const taskId = db.createTask({ title: "Test task" });
+
+      const program = createCli();
+      program.exitOverride();
+
+      await expect(
+        program.parseAsync(["node", "test", "--json", "-d", tempDir, "update-wip", taskId, "invalid json"])
+      ).rejects.toThrow();
+    });
+
+    it("should fail for non-existent task", async () => {
+      const program = createCli();
+      program.exitOverride();
+
+      const wipData = JSON.stringify({ files_modified: ["src/test.ts"] });
+
+      await expect(
+        program.parseAsync(["node", "test", "--json", "-d", tempDir, "update-wip", "non-existent", wipData])
+      ).rejects.toThrow();
     });
   });
 
