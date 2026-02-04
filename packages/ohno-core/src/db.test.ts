@@ -1233,4 +1233,205 @@ describe("TaskDatabase", () => {
       });
     });
   });
+
+  describe("Batch Retrieval", () => {
+    describe("getNextBatch", () => {
+      it("should return empty array when no tasks available", () => {
+        const batch = db.getNextBatch();
+        expect(batch).toEqual([]);
+      });
+
+      it("should return todo tasks", () => {
+        db.createTask({ title: "Todo 1" });
+        db.createTask({ title: "Todo 2" });
+
+        const batch = db.getNextBatch();
+        expect(batch.length).toBe(2);
+        expect(batch.every(t => t.status === "todo")).toBe(true);
+      });
+
+      it("should return tasks with needs_rework=1", () => {
+        const task1 = db.createTask({ title: "Task 1" });
+        db.updateTaskStatus(task1, "done");
+        db.setNeedsRework(task1, true);
+
+        const batch = db.getNextBatch();
+        expect(batch.length).toBe(1);
+        expect(batch[0].id).toBe(task1);
+        expect(batch[0].needs_rework).toBe(1);
+      });
+
+      it("should exclude archived tasks", () => {
+        const task1 = db.createTask({ title: "Task 1" });
+        const task2 = db.createTask({ title: "Task 2" });
+        db.archiveTask(task1);
+
+        const batch = db.getNextBatch();
+        expect(batch.length).toBe(1);
+        expect(batch[0].id).toBe(task2);
+      });
+
+      it("should exclude in_progress and review tasks", () => {
+        const task1 = db.createTask({ title: "Task 1" });
+        const task2 = db.createTask({ title: "Task 2" });
+        const task3 = db.createTask({ title: "Task 3" });
+
+        db.updateTaskStatus(task1, "in_progress");
+        db.updateTaskStatus(task2, "review");
+
+        const batch = db.getNextBatch();
+        expect(batch.length).toBe(1);
+        expect(batch[0].id).toBe(task3);
+      });
+
+      it("should filter out tasks with unmet dependencies", () => {
+        const task1 = db.createTask({ title: "Task 1" });
+        const task2 = db.createTask({ title: "Task 2 - blocked" });
+
+        db.addDependency(task2, task1);
+
+        const batch = db.getNextBatch();
+        expect(batch.length).toBe(1);
+        expect(batch[0].id).toBe(task1);
+      });
+
+      it("should include tasks when dependencies are done", () => {
+        const task1 = db.createTask({ title: "Task 1" });
+        const task2 = db.createTask({ title: "Task 2" });
+
+        db.addDependency(task2, task1);
+        db.updateTaskStatus(task1, "done");
+
+        const batch = db.getNextBatch();
+        expect(batch.some(t => t.id === task2)).toBe(true);
+      });
+
+      it("should respect default size of 3", () => {
+        db.createTask({ title: "Task 1" });
+        db.createTask({ title: "Task 2" });
+        db.createTask({ title: "Task 3" });
+        db.createTask({ title: "Task 4" });
+        db.createTask({ title: "Task 5" });
+
+        const batch = db.getNextBatch();
+        expect(batch.length).toBe(3);
+      });
+
+      it("should respect custom size parameter", () => {
+        db.createTask({ title: "Task 1" });
+        db.createTask({ title: "Task 2" });
+        db.createTask({ title: "Task 3" });
+        db.createTask({ title: "Task 4" });
+        db.createTask({ title: "Task 5" });
+
+        const batch = db.getNextBatch(2);
+        expect(batch.length).toBe(2);
+      });
+
+      it("should enforce max size of 5", () => {
+        for (let i = 1; i <= 10; i++) {
+          db.createTask({ title: `Task ${i}` });
+        }
+
+        const batch = db.getNextBatch(10);
+        expect(batch.length).toBe(5);
+      });
+
+      it("should order by epic priority then created_at", () => {
+        // Create epics with different priorities
+        const epic1 = db.createEpic({ title: "P2 Epic", priority: "P2" });
+        const epic2 = db.createEpic({ title: "P0 Epic", priority: "P0" });
+        const epic3 = db.createEpic({ title: "P1 Epic", priority: "P1" });
+
+        // Create stories
+        const story1 = db.createStory({ title: "Story 1", epic_id: epic1 });
+        const story2 = db.createStory({ title: "Story 2", epic_id: epic2 });
+        const story3 = db.createStory({ title: "Story 3", epic_id: epic3 });
+
+        // Create tasks (order matters for created_at)
+        const task1 = db.createTask({ title: "P2 Task 1", story_id: story1 });
+        const task2 = db.createTask({ title: "P0 Task 1", story_id: story2 });
+        const task3 = db.createTask({ title: "P1 Task 1", story_id: story3 });
+        const task4 = db.createTask({ title: "P0 Task 2", story_id: story2 });
+
+        const batch = db.getNextBatch(4);
+
+        // Should be ordered: P0 tasks first, then P1, then P2
+        // Within same priority, oldest created_at first
+        expect(batch[0].id).toBe(task2); // P0, created first
+        expect(batch[1].id).toBe(task4); // P0, created second
+        expect(batch[2].id).toBe(task3); // P1
+        expect(batch[3].id).toBe(task1); // P2
+      });
+
+      it("should attach failure_context for tasks with needs_rework", () => {
+        const task1 = db.createTask({ title: "Task 1" });
+        db.updateTaskStatus(task1, "done");
+
+        db.addTaskFailure(task1, "implementation", "Test failed", 1);
+        db.addTaskFailure(task1, "spec", "Wrong behavior", 2);
+        db.setNeedsRework(task1, true);
+
+        const batch = db.getNextBatch();
+        expect(batch.length).toBe(1);
+        expect(batch[0].failure_context).toBeDefined();
+        expect(batch[0].failure_context?.length).toBe(2);
+
+        // Check that both failure types are present (order may vary)
+        const failureTypes = batch[0].failure_context?.map(f => f.failure_type);
+        expect(failureTypes).toContain("spec");
+        expect(failureTypes).toContain("implementation");
+      });
+
+      it("should not attach failure_context for tasks without needs_rework", () => {
+        const task1 = db.createTask({ title: "Task 1" });
+
+        // Add failures but don't set needs_rework
+        db.addTaskFailure(task1, "implementation", "Test failed", 1);
+
+        const batch = db.getNextBatch();
+        expect(batch.length).toBe(1);
+        expect(batch[0].failure_context).toBeUndefined();
+      });
+
+      it("should handle mix of todo and needs_rework tasks", () => {
+        const task1 = db.createTask({ title: "Todo task" });
+        const task2 = db.createTask({ title: "Rework task" });
+
+        db.updateTaskStatus(task2, "done");
+        db.addTaskFailure(task2, "implementation", "Failed", 1);
+        db.setNeedsRework(task2, true);
+
+        const batch = db.getNextBatch(5);
+        expect(batch.length).toBe(2);
+
+        const todoTask = batch.find(t => t.id === task1);
+        const reworkTask = batch.find(t => t.id === task2);
+
+        expect(todoTask?.failure_context).toBeUndefined();
+        expect(reworkTask?.failure_context).toBeDefined();
+        expect(reworkTask?.failure_context?.length).toBe(1);
+      });
+
+      it("should handle tasks without epic (null epic_priority)", () => {
+        // Task without story/epic
+        const task1 = db.createTask({ title: "Orphan task 1" });
+
+        // Task with story but no epic
+        const story1 = db.createStory({ title: "Orphan story" });
+        const task2 = db.createTask({ title: "Task with orphan story", story_id: story1 });
+
+        // Task with epic
+        const epic1 = db.createEpic({ title: "Epic", priority: "P0" });
+        const story2 = db.createStory({ title: "Story", epic_id: epic1 });
+        const task3 = db.createTask({ title: "Task with epic", story_id: story2 });
+
+        const batch = db.getNextBatch(5);
+        expect(batch.length).toBe(3);
+
+        // Task with P0 epic should come first
+        expect(batch[0].id).toBe(task3);
+      });
+    });
+  });
 });

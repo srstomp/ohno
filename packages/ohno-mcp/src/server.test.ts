@@ -33,6 +33,7 @@ import {
   EpicIdSchema,
   UpdateEpicSchema,
   GetEpicsSchema,
+  GetNextBatchSchema,
   RecordFailureSchema,
 } from "./server.js";
 
@@ -55,8 +56,8 @@ describe("MCP Server", () => {
   });
 
   describe("Tool Definitions", () => {
-    it("should have 30 tools defined", () => {
-      expect(TOOLS.length).toBe(30);
+    it("should have 31 tools defined", () => {
+      expect(TOOLS.length).toBe(31);
     });
 
     it("should have unique tool names", () => {
@@ -81,6 +82,7 @@ describe("MCP Server", () => {
         "get_tasks",
         "get_task",
         "get_next_task",
+        "get_next_batch",
         "get_blocked_tasks",
         "update_task_status",
         "add_task_activity",
@@ -678,6 +680,34 @@ describe("MCP Server", () => {
       });
     });
 
+    describe("GetNextBatchSchema", () => {
+      it("should accept empty object with default batch_size", () => {
+        const result = GetNextBatchSchema.parse({});
+        expect(result.batch_size).toBe(3);
+      });
+
+      it("should accept valid batch_size", () => {
+        const result = GetNextBatchSchema.parse({ batch_size: 2 });
+        expect(result.batch_size).toBe(2);
+      });
+
+      it("should validate minimum batch_size", () => {
+        expect(() => GetNextBatchSchema.parse({ batch_size: 0 })).toThrow(ZodError);
+        const result = GetNextBatchSchema.parse({ batch_size: 1 });
+        expect(result.batch_size).toBe(1);
+      });
+
+      it("should validate maximum batch_size", () => {
+        expect(() => GetNextBatchSchema.parse({ batch_size: 6 })).toThrow(ZodError);
+        const result = GetNextBatchSchema.parse({ batch_size: 5 });
+        expect(result.batch_size).toBe(5);
+      });
+
+      it("should reject non-numeric batch_size", () => {
+        expect(() => GetNextBatchSchema.parse({ batch_size: "3" })).toThrow(ZodError);
+      });
+    });
+
     describe("RecordFailureSchema", () => {
       it("should accept valid failure record with all required fields", () => {
         const result = RecordFailureSchema.parse({
@@ -865,6 +895,100 @@ describe("MCP Server", () => {
         db.createTask({ title: "Available task" });
         const result = await handleTool("get_next_task", {}) as { title: string };
         expect(result.title).toBe("Available task");
+      });
+    });
+
+    describe("get_next_batch", () => {
+      it("should return empty batch when no tasks", async () => {
+        const result = await handleTool("get_next_batch", {}) as { tasks: unknown[]; batch_size: number };
+        expect(result.tasks).toEqual([]);
+        expect(result.batch_size).toBe(0);
+      });
+
+      it("should return batch with default size of 3", async () => {
+        for (let i = 1; i <= 5; i++) {
+          db.createTask({ title: `Task ${i}` });
+        }
+
+        const result = await handleTool("get_next_batch", {}) as { tasks: unknown[]; batch_size: number };
+        expect(result.tasks.length).toBe(3);
+        expect(result.batch_size).toBe(3);
+      });
+
+      it("should respect custom batch_size parameter", async () => {
+        for (let i = 1; i <= 5; i++) {
+          db.createTask({ title: `Task ${i}` });
+        }
+
+        const result = await handleTool("get_next_batch", { batch_size: 2 }) as { tasks: unknown[]; batch_size: number };
+        expect(result.tasks.length).toBe(2);
+        expect(result.batch_size).toBe(2);
+      });
+
+      it("should enforce max batch_size of 5 via validation", async () => {
+        for (let i = 1; i <= 10; i++) {
+          db.createTask({ title: `Task ${i}` });
+        }
+
+        // Should throw ZodError for batch_size > 5
+        await expect(handleTool("get_next_batch", { batch_size: 10 })).rejects.toThrow(ZodError);
+
+        // Should work with batch_size = 5
+        const result = await handleTool("get_next_batch", { batch_size: 5 }) as { tasks: unknown[]; batch_size: number };
+        expect(result.tasks.length).toBe(5);
+        expect(result.batch_size).toBe(5);
+      });
+
+      it("should include tasks with needs_rework=1", async () => {
+        const task1 = db.createTask({ title: "Rework task" });
+        db.updateTaskStatus(task1, "done");
+        db.setNeedsRework(task1, true);
+
+        const result = await handleTool("get_next_batch", {}) as { tasks: Array<{ id: string }> };
+        expect(result.tasks.length).toBe(1);
+        expect(result.tasks[0].id).toBe(task1);
+      });
+
+      it("should attach failure_context for tasks with needs_rework", async () => {
+        const task1 = db.createTask({ title: "Failed task" });
+        db.updateTaskStatus(task1, "done");
+        db.addTaskFailure(task1, "implementation", "Test failed", 1);
+        db.setNeedsRework(task1, true);
+
+        const result = await handleTool("get_next_batch", {}) as {
+          tasks: Array<{ failure_context?: Array<{ failure_reason: string }> }>;
+        };
+
+        expect(result.tasks.length).toBe(1);
+        expect(result.tasks[0].failure_context).toBeDefined();
+        expect(result.tasks[0].failure_context?.length).toBe(1);
+        expect(result.tasks[0].failure_context?.[0].failure_reason).toBe("Test failed");
+      });
+
+      it("should exclude tasks with unmet dependencies", async () => {
+        const task1 = db.createTask({ title: "Task 1" });
+        const task2 = db.createTask({ title: "Task 2 - blocked" });
+        db.addDependency(task2, task1);
+
+        const result = await handleTool("get_next_batch", {}) as { tasks: Array<{ id: string }> };
+        expect(result.tasks.length).toBe(1);
+        expect(result.tasks[0].id).toBe(task1);
+      });
+
+      it("should order by epic priority", async () => {
+        const epic1 = db.createEpic({ title: "P2 Epic", priority: "P2" });
+        const epic2 = db.createEpic({ title: "P0 Epic", priority: "P0" });
+
+        const story1 = db.createStory({ title: "Story 1", epic_id: epic1 });
+        const story2 = db.createStory({ title: "Story 2", epic_id: epic2 });
+
+        const task1 = db.createTask({ title: "P2 Task", story_id: story1 });
+        const task2 = db.createTask({ title: "P0 Task", story_id: story2 });
+
+        const result = await handleTool("get_next_batch", {}) as { tasks: Array<{ id: string }> };
+        expect(result.tasks.length).toBe(2);
+        expect(result.tasks[0].id).toBe(task2); // P0 first
+        expect(result.tasks[1].id).toBe(task1); // P2 second
       });
     });
 

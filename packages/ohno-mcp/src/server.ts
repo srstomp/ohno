@@ -158,6 +158,10 @@ const KanbanBoardSchema = z.object({
   limit_per_column: z.number().min(1).max(50).default(20),
 });
 
+const GetNextBatchSchema = z.object({
+  batch_size: z.number().min(1).max(5).default(3),
+});
+
 // Tool definitions
 const TOOLS = [
   {
@@ -200,6 +204,16 @@ const TOOLS = [
     name: "get_next_task",
     description: "Get the recommended next task to work on based on priority and dependencies",
     inputSchema: { type: "object" as const, properties: {} },
+  },
+  {
+    name: "get_next_batch",
+    description: "Get a batch of up to N tasks ready for immediate execution. Returns tasks with status=todo or needs_rework=1, excluding tasks with unmet dependencies. Tasks are ordered by epic priority (P0 first) then creation date. Tasks needing rework include failure_context with previous failure details.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        batch_size: { type: "number", description: "Number of tasks to return (1-5, default 3)", default: 3 },
+      },
+    },
   },
   {
     name: "get_blocked_tasks",
@@ -529,6 +543,7 @@ export {
   UpdateEpicSchema,
   GetEpicsSchema,
   KanbanBoardSchema,
+  GetNextBatchSchema,
   UpdateTaskSchema,
   ActivitySchema,
   HandoffNotesSchema,
@@ -598,6 +613,12 @@ export async function handleTool(name: string, args: Record<string, unknown>): P
         return { message: "No tasks available" };
       }
       return task;
+    }
+
+    case "get_next_batch": {
+      const parsed = GetNextBatchSchema.parse(args);
+      const tasks = database.getNextBatch(parsed.batch_size);
+      return { tasks, batch_size: tasks.length };
     }
 
     case "get_blocked_tasks":
