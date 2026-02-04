@@ -828,6 +828,119 @@ describe("CLI Commands", () => {
     });
   });
 
+  describe("set-handoff command", () => {
+    it("should store handoff with status and summary", async () => {
+      const taskId = db.createTask({ title: "Test task" });
+
+      const program = createCli();
+      program.exitOverride();
+
+      await program.parseAsync([
+        "node",
+        "test",
+        "--json",
+        "-d",
+        tempDir,
+        "set-handoff",
+        taskId,
+        "PASS",
+        "Implementation complete",
+      ]);
+
+      const output = getConsoleOutput(consoleLogSpy);
+      const parsed = JSON.parse(output);
+      expect(parsed.success).toBe(true);
+
+      // Reload to see changes made by CLI
+      await db.reload();
+      const handoff = db.getTaskHandoff(taskId);
+      expect(handoff).toBeDefined();
+      expect(handoff?.status).toBe("PASS");
+      expect(handoff?.summary).toBe("Implementation complete");
+    });
+
+    it("should store handoff with files changed", async () => {
+      const taskId = db.createTask({ title: "Test task" });
+
+      const program = createCli();
+      program.exitOverride();
+
+      await program.parseAsync([
+        "node",
+        "test",
+        "--json",
+        "-d",
+        tempDir,
+        "set-handoff",
+        taskId,
+        "PASS",
+        "Added new feature",
+        "--files",
+        '["src/feature.ts","src/test.ts"]',
+      ]);
+
+      const output = getConsoleOutput(consoleLogSpy);
+      const parsed = JSON.parse(output);
+      expect(parsed.success).toBe(true);
+
+      // Reload to see changes made by CLI
+      await db.reload();
+      const handoff = db.getTaskHandoff(taskId);
+      expect(handoff?.files_changed).toEqual(["src/feature.ts", "src/test.ts"]);
+    });
+
+    it("should store handoff with full details", async () => {
+      const taskId = db.createTask({ title: "Test task" });
+
+      const program = createCli();
+      program.exitOverride();
+
+      const fullDetails = "Full implementation report with all details";
+
+      await program.parseAsync([
+        "node",
+        "test",
+        "--json",
+        "-d",
+        tempDir,
+        "set-handoff",
+        taskId,
+        "FAIL",
+        "Tests failed",
+        "--details",
+        fullDetails,
+      ]);
+
+      const output = getConsoleOutput(consoleLogSpy);
+      const parsed = JSON.parse(output);
+      expect(parsed.success).toBe(true);
+
+      // Reload to see changes made by CLI
+      await db.reload();
+      const handoff = db.getTaskHandoff(taskId, true);
+      expect(handoff?.full_details).toBe(fullDetails);
+    });
+
+    it("should fail for non-existent task", async () => {
+      const program = createCli();
+      program.exitOverride();
+
+      await expect(
+        program.parseAsync([
+          "node",
+          "test",
+          "--json",
+          "-d",
+          tempDir,
+          "set-handoff",
+          "non-existent",
+          "PASS",
+          "Summary",
+        ])
+      ).rejects.toThrow();
+    });
+  });
+
   describe("kanban command", () => {
     it("should have kanban command", () => {
       const program = createCli();

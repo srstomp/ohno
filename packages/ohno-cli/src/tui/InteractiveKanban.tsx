@@ -62,13 +62,16 @@ export function InteractiveKanban({
     }
   });
 
-  // Auto-refresh
+  // Auto-refresh (only update state if data actually changed)
   useEffect(() => {
     if (!onRefresh) return;
     const interval = setInterval(async () => {
       const newData = await onRefresh();
-      setData(newData);
-    }, 1000);
+      setData((prev) => {
+        if (JSON.stringify(prev) === JSON.stringify(newData)) return prev;
+        return newData;
+      });
+    }, 3000);
     return () => clearInterval(interval);
   }, [onRefresh]);
 
