@@ -85,6 +85,8 @@ export const EXTENDED_TASK_COLUMNS: [string, string][] = [
   ["activity_summary", "TEXT"],
   ["source", "TEXT DEFAULT 'human'"],
   ["needs_rework", "INTEGER DEFAULT 0"],
+  ["work_in_progress", "TEXT"],
+  ["wip_updated_at", "TEXT"],
 ];
 
 /**

@@ -15,7 +15,7 @@ export type Priority = "P0" | "P1" | "P2" | "P3";
 export type TaskSource = "human" | "pokayokay-plan" | "kaizen-fix" | "kaizen-suggest";
 
 // Activity type enum
-export type ActivityType = "status_change" | "note" | "file_change" | "decision" | "progress" | "created" | "updated" | "blocker_set" | "blocker_resolved";
+export type ActivityType = "status_change" | "note" | "file_change" | "decision" | "progress" | "created" | "updated" | "blocker_set" | "blocker_resolved" | "wip_update";
 
 // Dependency type enum
 export type DependencyType = "blocks" | "requires" | "relates_to";
@@ -49,6 +49,8 @@ export interface Task {
   activity_summary?: string;
   source?: TaskSource;
   needs_rework?: number;
+  work_in_progress?: string;
+  wip_updated_at?: string;
   // Joined fields from relationships
   story_title?: string;
   story_status?: TaskStatus;
