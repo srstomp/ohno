@@ -36,6 +36,8 @@ import {
   GetNextBatchSchema,
   RecordFailureSchema,
   UpdateTaskWipSchema,
+  SetTaskHandoffSchema,
+  GetTaskHandoffSchema,
 } from "./server.js";
 
 describe("MCP Server", () => {
@@ -57,8 +59,8 @@ describe("MCP Server", () => {
   });
 
   describe("Tool Definitions", () => {
-    it("should have 32 tools defined", () => {
-      expect(TOOLS.length).toBe(32);
+    it("should have 34 tools defined", () => {
+      expect(TOOLS.length).toBe(34);
     });
 
     it("should have unique tool names", () => {
@@ -706,6 +708,139 @@ describe("MCP Server", () => {
 
       it("should reject non-numeric batch_size", () => {
         expect(() => GetNextBatchSchema.parse({ batch_size: "3" })).toThrow(ZodError);
+      });
+    });
+
+    describe("SetTaskHandoffSchema", () => {
+      it("should accept valid handoff with all required fields", () => {
+        const result = SetTaskHandoffSchema.parse({
+          task_id: "task-123",
+          status: "PASS",
+          summary: "Task completed successfully",
+        });
+        expect(result.task_id).toBe("task-123");
+        expect(result.status).toBe("PASS");
+        expect(result.summary).toBe("Task completed successfully");
+      });
+
+      it("should accept all valid status types", () => {
+        const validStatuses = ["PASS", "FAIL", "BLOCKED"];
+        for (const status of validStatuses) {
+          const result = SetTaskHandoffSchema.parse({
+            task_id: "task-123",
+            status: status,
+            summary: "Test summary",
+          });
+          expect(result.status).toBe(status);
+        }
+      });
+
+      it("should accept optional files_changed array", () => {
+        const result = SetTaskHandoffSchema.parse({
+          task_id: "task-123",
+          status: "PASS",
+          summary: "Summary",
+          files_changed: ["src/a.ts", "src/b.ts"],
+        });
+        expect(result.files_changed).toEqual(["src/a.ts", "src/b.ts"]);
+      });
+
+      it("should accept optional full_details", () => {
+        const result = SetTaskHandoffSchema.parse({
+          task_id: "task-123",
+          status: "PASS",
+          summary: "Summary",
+          full_details: "Long output",
+        });
+        expect(result.full_details).toBe("Long output");
+      });
+
+      it("should reject invalid status", () => {
+        expect(() =>
+          SetTaskHandoffSchema.parse({
+            task_id: "task-123",
+            status: "INVALID",
+            summary: "Summary",
+          })
+        ).toThrow(ZodError);
+      });
+
+      it("should reject missing task_id", () => {
+        expect(() =>
+          SetTaskHandoffSchema.parse({
+            status: "PASS",
+            summary: "Summary",
+          })
+        ).toThrow(ZodError);
+      });
+
+      it("should reject empty task_id", () => {
+        expect(() =>
+          SetTaskHandoffSchema.parse({
+            task_id: "",
+            status: "PASS",
+            summary: "Summary",
+          })
+        ).toThrow(ZodError);
+      });
+
+      it("should reject missing status", () => {
+        expect(() =>
+          SetTaskHandoffSchema.parse({
+            task_id: "task-123",
+            summary: "Summary",
+          })
+        ).toThrow(ZodError);
+      });
+
+      it("should reject missing summary", () => {
+        expect(() =>
+          SetTaskHandoffSchema.parse({
+            task_id: "task-123",
+            status: "PASS",
+          })
+        ).toThrow(ZodError);
+      });
+
+      it("should reject empty summary", () => {
+        expect(() =>
+          SetTaskHandoffSchema.parse({
+            task_id: "task-123",
+            status: "PASS",
+            summary: "",
+          })
+        ).toThrow(ZodError);
+      });
+    });
+
+    describe("GetTaskHandoffSchema", () => {
+      it("should accept valid task_id", () => {
+        const result = GetTaskHandoffSchema.parse({ task_id: "task-123" });
+        expect(result.task_id).toBe("task-123");
+        expect(result.include_details).toBe(false); // default
+      });
+
+      it("should accept include_details parameter", () => {
+        const result = GetTaskHandoffSchema.parse({
+          task_id: "task-123",
+          include_details: true,
+        });
+        expect(result.include_details).toBe(true);
+      });
+
+      it("should default include_details to false", () => {
+        const result = GetTaskHandoffSchema.parse({ task_id: "task-123" });
+        expect(result.include_details).toBe(false);
+      });
+
+      it("should reject missing task_id", () => {
+        expect(() => GetTaskHandoffSchema.parse({})).toThrow(ZodError);
+      });
+
+      it("should reject empty task_id", () => {
+        expect(() =>
+          GetTaskHandoffSchema.parse({ task_id: "" })
+        ).toThrow(ZodError);
       });
     });
 
@@ -1994,6 +2129,135 @@ describe("MCP Server", () => {
         const parsedWip = JSON.parse(task!.work_in_progress!);
         expect(parsedWip.test_results.passed).toBe(12);
         expect(parsedWip.decisions[0].decision).toBe("JWT over sessions");
+      });
+    });
+
+    describe("set_task_handoff", () => {
+      it("should store handoff and return minimal response", async () => {
+        const taskId = db.createTask({ title: "Test task" });
+        const result = await handleTool("set_task_handoff", {
+          task_id: taskId,
+          status: "PASS",
+          summary: "Task completed successfully",
+        }) as { status: string; summary: string };
+
+        expect(result.status).toBe("PASS");
+        expect(result.summary).toBe("Task completed successfully");
+        // Should NOT include full_details in response
+        expect(result).not.toHaveProperty("full_details");
+      });
+
+      it("should store handoff with all optional fields", async () => {
+        const taskId = db.createTask({ title: "Test task" });
+        const result = await handleTool("set_task_handoff", {
+          task_id: taskId,
+          status: "PASS",
+          summary: "Implemented feature",
+          files_changed: ["src/auth.ts", "src/middleware.ts"],
+          full_details: "Very long detailed output",
+        }) as { status: string; summary: string };
+
+        expect(result.status).toBe("PASS");
+        expect(result.summary).toBe("Implemented feature");
+        // Should NOT return full_details even if it was stored
+        expect(result).not.toHaveProperty("full_details");
+        expect(result).not.toHaveProperty("files_changed");
+
+        // Verify it was stored by retrieving it
+        const handoff = db.getTaskHandoff(taskId, true);
+        expect(handoff?.files_changed).toEqual(["src/auth.ts", "src/middleware.ts"]);
+        expect(handoff?.full_details).toBe("Very long detailed output");
+      });
+
+      it("should handle all status types", async () => {
+        const statuses = ["PASS", "FAIL", "BLOCKED"];
+        for (const status of statuses) {
+          const taskId = db.createTask({ title: `Test ${status}` });
+          const result = await handleTool("set_task_handoff", {
+            task_id: taskId,
+            status: status,
+            summary: `Test ${status} summary`,
+          }) as { status: string };
+
+          expect(result.status).toBe(status);
+        }
+      });
+
+      it("should reject invalid status", async () => {
+        const taskId = db.createTask({ title: "Test task" });
+        await expect(
+          handleTool("set_task_handoff", {
+            task_id: taskId,
+            status: "INVALID",
+            summary: "Test",
+          })
+        ).rejects.toThrow(ZodError);
+      });
+
+      it("should reject missing required fields", async () => {
+        await expect(
+          handleTool("set_task_handoff", {
+            task_id: "task-123",
+            status: "PASS",
+          })
+        ).rejects.toThrow(ZodError);
+
+        await expect(
+          handleTool("set_task_handoff", {
+            task_id: "task-123",
+            summary: "Summary",
+          })
+        ).rejects.toThrow(ZodError);
+      });
+    });
+
+    describe("get_task_handoff", () => {
+      it("should retrieve handoff without full_details by default", async () => {
+        const taskId = db.createTask({ title: "Test task" });
+        db.setTaskHandoff(
+          taskId,
+          "PASS",
+          "Brief summary",
+          ["file1.ts"],
+          "Long detailed output"
+        );
+
+        const result = await handleTool("get_task_handoff", {
+          task_id: taskId,
+        }) as { task_id: string; status: string; summary: string; full_details?: string };
+
+        expect(result.task_id).toBe(taskId);
+        expect(result.status).toBe("PASS");
+        expect(result.summary).toBe("Brief summary");
+        expect(result.files_changed).toEqual(["file1.ts"]);
+        expect(result.full_details).toBeUndefined();
+      });
+
+      it("should retrieve full_details when include_details=true", async () => {
+        const taskId = db.createTask({ title: "Test task" });
+        const fullDetails = "Complete detailed output";
+        db.setTaskHandoff(taskId, "PASS", "Summary", undefined, fullDetails);
+
+        const result = await handleTool("get_task_handoff", {
+          task_id: taskId,
+          include_details: true,
+        }) as { full_details?: string };
+
+        expect(result.full_details).toBe(fullDetails);
+      });
+
+      it("should return error for non-existent handoff", async () => {
+        const result = await handleTool("get_task_handoff", {
+          task_id: "non-existent",
+        }) as { error: string };
+
+        expect(result.error).toBe("Handoff not found");
+      });
+
+      it("should reject missing task_id", async () => {
+        await expect(
+          handleTool("get_task_handoff", {})
+        ).rejects.toThrow(ZodError);
       });
     });
 

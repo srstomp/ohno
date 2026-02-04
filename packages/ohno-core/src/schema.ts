@@ -142,6 +142,20 @@ CREATE TABLE IF NOT EXISTS task_failures (
 )`;
 
 /**
+ * SQL to create the task_handoffs table
+ */
+export const CREATE_TASK_HANDOFFS_TABLE = `
+CREATE TABLE IF NOT EXISTS task_handoffs (
+  task_id TEXT PRIMARY KEY,
+  status TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  files_changed TEXT,
+  full_details TEXT,
+  created_at TEXT,
+  compacted_at TEXT
+)`;
+
+/**
  * Indexes for performance
  */
 export const CREATE_INDEXES = [
