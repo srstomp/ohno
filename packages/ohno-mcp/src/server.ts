@@ -185,6 +185,14 @@ const GetTaskHandoffSchema = z.object({
   include_details: z.boolean().default(false).describe("Include full_details in response"),
 });
 
+const CompactStoryHandoffsSchema = z.object({
+  story_id: z.string().min(1).describe("Story ID"),
+});
+
+const DeleteEpicHandoffsSchema = z.object({
+  epic_id: z.string().min(1).describe("Epic ID"),
+});
+
 // Tool definitions
 const TOOLS = [
   {
@@ -594,6 +602,28 @@ const TOOLS = [
       required: ["task_id"],
     },
   },
+  {
+    name: "compact_story_handoffs",
+    description: "Compact handoffs for a completed story. Removes full_details but keeps summaries. Skips failed/blocked tasks.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        story_id: { type: "string", description: "Story ID to compact handoffs for" },
+      },
+      required: ["story_id"],
+    },
+  },
+  {
+    name: "delete_epic_handoffs",
+    description: "Delete handoffs for a completed epic. Removes handoff records entirely. Skips failed/blocked tasks.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        epic_id: { type: "string", description: "Epic ID to delete handoffs for" },
+      },
+      required: ["epic_id"],
+    },
+  },
 ];
 
 // Export schemas for testing
@@ -626,6 +656,8 @@ export {
   NeedsReworkSchema,
   SetTaskHandoffSchema,
   GetTaskHandoffSchema,
+  CompactStoryHandoffsSchema,
+  DeleteEpicHandoffsSchema,
 };
 
 // Export tool definitions for testing
@@ -933,6 +965,18 @@ export async function handleTool(name: string, args: Record<string, unknown>): P
         return { error: "Handoff not found" };
       }
       return handoff;
+    }
+
+    case "compact_story_handoffs": {
+      const parsed = CompactStoryHandoffsSchema.parse(args);
+      const count = database.compactStoryHandoffs(parsed.story_id);
+      return { compacted: count };
+    }
+
+    case "delete_epic_handoffs": {
+      const parsed = DeleteEpicHandoffsSchema.parse(args);
+      const count = database.deleteEpicHandoffs(parsed.epic_id);
+      return { deleted: count };
     }
 
     default:

@@ -1487,12 +1487,123 @@ export class TaskDatabase {
         status: row.status as HandoffStatus,
         summary: row.summary as string,
         files_changed: row.files_changed ? JSON.parse(row.files_changed as string) : undefined,
-        full_details: includeDetails ? (row.full_details as string ?? undefined) : undefined,
+        full_details: includeDetails ? (row.full_details !== null ? row.full_details as string : null) : undefined,
         created_at: row.created_at as string ?? undefined,
-        compacted_at: row.compacted_at as string ?? undefined,
+        compacted_at: row.compacted_at !== null ? row.compacted_at as string : null,
       };
     }
     stmt.free();
     return null;
+  }
+
+  // ==========================================================================
+  // Memory Decay Methods
+  // ==========================================================================
+
+  /**
+   * Compact handoffs for a completed story.
+   * Removes full_details but keeps summary.
+   * Skips blocked/failed tasks (preserve for debugging).
+   */
+  compactStoryHandoffs(storyId: string): number {
+    // Get all tasks in the story
+    const sql = `SELECT id, status FROM tasks WHERE story_id = ?`;
+    const stmt = this.db.prepare(sql);
+    stmt.bind([storyId]);
+
+    const taskRows: Array<{ id: string; status: string }> = [];
+    while (stmt.step()) {
+      const row = stmt.getAsObject();
+      taskRows.push({
+        id: row.id as string,
+        status: row.status as string,
+      });
+    }
+    stmt.free();
+
+    let compacted = 0;
+    const timestamp = getTimestamp();
+
+    for (const task of taskRows) {
+      // Skip blocked tasks
+      if (task.status === "blocked") continue;
+
+      // Check handoff - need full details to see if already compacted
+      const handoff = this.getTaskHandoff(task.id, true);
+      if (!handoff) continue;
+      if (handoff.status === "FAIL" || handoff.status === "BLOCKED") continue;
+
+      // Skip if already compacted (full_details is already null or undefined)
+      if (handoff.full_details === null || handoff.full_details === undefined) continue;
+
+      // Compact: null out full_details, set compacted_at
+      this.db.run(
+        `UPDATE task_handoffs SET full_details = NULL, compacted_at = ? WHERE task_id = ?`,
+        [timestamp, task.id]
+      );
+      if (this.db.getRowsModified() > 0) {
+        compacted++;
+      }
+    }
+
+    if (compacted > 0) this.save();
+    return compacted;
+  }
+
+  /**
+   * Delete handoffs for a completed epic.
+   * Removes handoff records entirely.
+   * Skips blocked/failed tasks (preserve for debugging).
+   */
+  deleteEpicHandoffs(epicId: string): number {
+    // Get all stories in the epic
+    const storySql = `SELECT id FROM stories WHERE epic_id = ?`;
+    const storyStmt = this.db.prepare(storySql);
+    storyStmt.bind([epicId]);
+
+    const storyRows: Array<{ id: string }> = [];
+    while (storyStmt.step()) {
+      const row = storyStmt.getAsObject();
+      storyRows.push({ id: row.id as string });
+    }
+    storyStmt.free();
+
+    let deleted = 0;
+
+    for (const story of storyRows) {
+      // Get all tasks in the story
+      const taskSql = `SELECT id, status FROM tasks WHERE story_id = ?`;
+      const taskStmt = this.db.prepare(taskSql);
+      taskStmt.bind([story.id]);
+
+      const taskRows: Array<{ id: string; status: string }> = [];
+      while (taskStmt.step()) {
+        const row = taskStmt.getAsObject();
+        taskRows.push({
+          id: row.id as string,
+          status: row.status as string,
+        });
+      }
+      taskStmt.free();
+
+      for (const task of taskRows) {
+        // Skip blocked tasks
+        if (task.status === "blocked") continue;
+
+        // Check handoff status - skip FAIL and BLOCKED
+        const handoff = this.getTaskHandoff(task.id, false);
+        if (!handoff) continue;
+        if (handoff.status === "FAIL" || handoff.status === "BLOCKED") continue;
+
+        // Delete handoff
+        this.db.run(`DELETE FROM task_handoffs WHERE task_id = ?`, [task.id]);
+        if (this.db.getRowsModified() > 0) {
+          deleted++;
+        }
+      }
+    }
+
+    if (deleted > 0) this.save();
+    return deleted;
   }
 }

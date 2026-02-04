@@ -59,8 +59,8 @@ describe("MCP Server", () => {
   });
 
   describe("Tool Definitions", () => {
-    it("should have 34 tools defined", () => {
-      expect(TOOLS.length).toBe(34);
+    it("should have 36 tools defined", () => {
+      expect(TOOLS.length).toBe(36);
     });
 
     it("should have unique tool names", () => {
@@ -2224,7 +2224,7 @@ describe("MCP Server", () => {
 
         const result = await handleTool("get_task_handoff", {
           task_id: taskId,
-        }) as { task_id: string; status: string; summary: string; full_details?: string };
+        }) as { task_id: string; status: string; summary: string; files_changed?: string[]; full_details?: string };
 
         expect(result.task_id).toBe(taskId);
         expect(result.status).toBe("PASS");
