@@ -102,6 +102,13 @@ const SummarizeSchema = z.object({
   delete_raw: z.boolean().default(false),
 });
 
+const RecordFailureSchema = z.object({
+  task_id: z.string().min(1),
+  failure_type: z.enum(["spec", "quality", "implementation"]),
+  reason: z.string().min(1),
+  attempt: z.number().optional(),
+});
+
 const CreateEpicSchema = z.object({
   title: z.string().min(1),
   project_id: z.string().optional(),
@@ -491,6 +498,20 @@ const TOOLS = [
       required: ["task_id"],
     },
   },
+  {
+    name: "record_task_failure",
+    description: "Record a task failure for pattern learning. Stores failure information including type, reason, and optional attempt number.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        task_id: { type: "string", description: "Task ID" },
+        failure_type: { type: "string", enum: ["spec", "quality", "implementation"], description: "Type of failure: spec (requirements issue), quality (quality issue), implementation (technical issue)" },
+        reason: { type: "string", description: "Human-readable description of why the task failed" },
+        attempt: { type: "number", description: "Optional attempt number" },
+      },
+      required: ["task_id", "failure_type", "reason"],
+    },
+  },
 ];
 
 // Export schemas for testing
@@ -517,6 +538,7 @@ export {
   DependencySchema,
   RemoveDependencySchema,
   SummarizeSchema,
+  RecordFailureSchema,
 };
 
 // Export tool definitions for testing
@@ -773,6 +795,17 @@ export async function handleTool(name: string, args: Record<string, unknown>): P
         return { success: false, message: "Not enough activity to summarize" };
       }
       return { success: true, summary };
+    }
+
+    case "record_task_failure": {
+      const parsed = RecordFailureSchema.parse(args);
+      const failureId = database.addTaskFailure(
+        parsed.task_id,
+        parsed.failure_type as "spec" | "quality" | "implementation",
+        parsed.reason,
+        parsed.attempt
+      );
+      return { success: true, failure_id: failureId };
     }
 
     default:
