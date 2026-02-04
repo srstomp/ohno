@@ -91,17 +91,17 @@ describe("Task Failures", () => {
       expect(reasons).toContain("Second failure");
     });
 
-    it("should return failures ordered by created_at DESC", () => {
+    it("should return failures ordered by created_at DESC", async () => {
       db.addTaskFailure(taskId, "spec", "First", 1);
       // Small delay to ensure different timestamps
-      const delay = new Promise(resolve => setTimeout(resolve, 10));
-      delay.then(() => {
-        db.addTaskFailure(taskId, "quality", "Second", 2);
-      });
+      await new Promise(resolve => setTimeout(resolve, 10));
+      db.addTaskFailure(taskId, "quality", "Second", 2);
 
       const failures = db.getTaskFailures(taskId);
       // Most recent should be first
-      expect(failures.length).toBeGreaterThan(0);
+      expect(failures.length).toBe(2);
+      expect(failures[0].failure_reason).toBe("Second");
+      expect(failures[1].failure_reason).toBe("First");
     });
 
     it("should only return failures for the specified task", () => {
