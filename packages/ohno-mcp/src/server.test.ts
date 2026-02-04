@@ -33,6 +33,7 @@ import {
   EpicIdSchema,
   UpdateEpicSchema,
   GetEpicsSchema,
+  RecordFailureSchema,
 } from "./server.js";
 
 describe("MCP Server", () => {
@@ -54,8 +55,8 @@ describe("MCP Server", () => {
   });
 
   describe("Tool Definitions", () => {
-    it("should have 28 tools defined", () => {
-      expect(TOOLS.length).toBe(28);
+    it("should have 30 tools defined", () => {
+      expect(TOOLS.length).toBe(30);
     });
 
     it("should have unique tool names", () => {
@@ -674,6 +675,98 @@ describe("MCP Server", () => {
         expect(result.limit).toBe(1);
         const result2 = GetEpicsSchema.parse({ limit: 100 });
         expect(result2.limit).toBe(100);
+      });
+    });
+
+    describe("RecordFailureSchema", () => {
+      it("should accept valid failure record with all required fields", () => {
+        const result = RecordFailureSchema.parse({
+          task_id: "task-123",
+          failure_type: "spec",
+          reason: "Requirements were unclear",
+        });
+        expect(result.task_id).toBe("task-123");
+        expect(result.failure_type).toBe("spec");
+        expect(result.reason).toBe("Requirements were unclear");
+      });
+
+      it("should accept all valid failure types", () => {
+        const validTypes = ["spec", "quality", "implementation"];
+        for (const type of validTypes) {
+          const result = RecordFailureSchema.parse({
+            task_id: "task-123",
+            failure_type: type,
+            reason: "Test reason",
+          });
+          expect(result.failure_type).toBe(type);
+        }
+      });
+
+      it("should accept optional attempt parameter", () => {
+        const result = RecordFailureSchema.parse({
+          task_id: "task-123",
+          failure_type: "implementation",
+          reason: "Failed",
+          attempt: 2,
+        });
+        expect(result.attempt).toBe(2);
+      });
+
+      it("should reject invalid failure_type", () => {
+        expect(() =>
+          RecordFailureSchema.parse({
+            task_id: "task-123",
+            failure_type: "invalid",
+            reason: "Test",
+          })
+        ).toThrow(ZodError);
+      });
+
+      it("should reject empty task_id", () => {
+        expect(() =>
+          RecordFailureSchema.parse({
+            task_id: "",
+            failure_type: "spec",
+            reason: "Test",
+          })
+        ).toThrow(ZodError);
+      });
+
+      it("should reject missing task_id", () => {
+        expect(() =>
+          RecordFailureSchema.parse({
+            failure_type: "spec",
+            reason: "Test",
+          })
+        ).toThrow(ZodError);
+      });
+
+      it("should reject missing failure_type", () => {
+        expect(() =>
+          RecordFailureSchema.parse({
+            task_id: "task-123",
+            reason: "Test",
+          })
+        ).toThrow(ZodError);
+      });
+
+      it("should reject missing reason", () => {
+        expect(() =>
+          RecordFailureSchema.parse({
+            task_id: "task-123",
+            failure_type: "spec",
+          })
+        ).toThrow(ZodError);
+      });
+
+      it("should reject empty reason", () => {
+        expect(() =>
+          RecordFailureSchema.parse({
+            task_id: "task-123",
+            failure_type: "spec",
+            reason: "",
+          })
+        ).toThrow(ZodError);
       });
     });
   });
@@ -1522,6 +1615,112 @@ describe("MCP Server", () => {
 
         expect(result.success).toBe(false);
         expect(result.message).toContain("Not enough activity");
+      });
+    });
+
+    describe("record_task_failure", () => {
+      it("should record failure and return failure_id", async () => {
+        const taskId = db.createTask({ title: "Test task" });
+        const result = await handleTool("record_task_failure", {
+          task_id: taskId,
+          failure_type: "spec",
+          reason: "Requirements were unclear",
+        }) as { success: boolean; failure_id: string };
+
+        expect(result.success).toBe(true);
+        expect(result.failure_id).toMatch(/^fail-[a-f0-9]{8}$/);
+
+        // Verify failure was recorded
+        const failures = db.getTaskFailures(taskId);
+        expect(failures.length).toBe(1);
+        expect(failures[0].failure_type).toBe("spec");
+        expect(failures[0].failure_reason).toBe("Requirements were unclear");
+      });
+
+      it("should accept all valid failure types", async () => {
+        const taskId = db.createTask({ title: "Test task" });
+        const validTypes = ["spec", "quality", "implementation"];
+
+        for (const type of validTypes) {
+          const result = await handleTool("record_task_failure", {
+            task_id: taskId,
+            failure_type: type,
+            reason: `Failure type: ${type}`,
+          }) as { success: boolean; failure_id: string };
+
+          expect(result.success).toBe(true);
+          expect(result.failure_id).toBeDefined();
+        }
+
+        const failures = db.getTaskFailures(taskId);
+        expect(failures.length).toBe(3);
+      });
+
+      it("should accept optional attempt parameter", async () => {
+        const taskId = db.createTask({ title: "Test task" });
+        const result = await handleTool("record_task_failure", {
+          task_id: taskId,
+          failure_type: "implementation",
+          reason: "Failed on second attempt",
+          attempt: 2,
+        }) as { success: boolean; failure_id: string };
+
+        expect(result.success).toBe(true);
+
+        const failures = db.getTaskFailures(taskId);
+        expect(failures.length).toBe(1);
+        expect(failures[0].attempt).toBe(2);
+      });
+
+      it("should reject invalid failure_type", async () => {
+        const taskId = db.createTask({ title: "Test task" });
+        await expect(
+          handleTool("record_task_failure", {
+            task_id: taskId,
+            failure_type: "invalid",
+            reason: "Test",
+          })
+        ).rejects.toThrow(ZodError);
+      });
+
+      it("should reject missing task_id", async () => {
+        await expect(
+          handleTool("record_task_failure", {
+            failure_type: "spec",
+            reason: "Test",
+          })
+        ).rejects.toThrow(ZodError);
+      });
+
+      it("should reject missing failure_type", async () => {
+        const taskId = db.createTask({ title: "Test task" });
+        await expect(
+          handleTool("record_task_failure", {
+            task_id: taskId,
+            reason: "Test",
+          })
+        ).rejects.toThrow(ZodError);
+      });
+
+      it("should reject missing reason", async () => {
+        const taskId = db.createTask({ title: "Test task" });
+        await expect(
+          handleTool("record_task_failure", {
+            task_id: taskId,
+            failure_type: "spec",
+          })
+        ).rejects.toThrow(ZodError);
+      });
+
+      it("should reject empty reason", async () => {
+        const taskId = db.createTask({ title: "Test task" });
+        await expect(
+          handleTool("record_task_failure", {
+            task_id: taskId,
+            failure_type: "spec",
+            reason: "",
+          })
+        ).rejects.toThrow(ZodError);
       });
     });
 
