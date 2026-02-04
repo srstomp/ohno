@@ -1675,7 +1675,7 @@ describe("MCP Server", () => {
           context_summary: "Almost done",
         });
 
-        expect(db.getTask(taskId)?.context_summary).toBe("Almost done");
+        expect(db.getTask(taskId, "full")?.context_summary).toBe("Almost done");
       });
     });
 
@@ -1910,7 +1910,7 @@ describe("MCP Server", () => {
         expect(result.success).toBe(true);
 
         // Verify WIP was updated
-        const task = db.getTask(taskId);
+        const task = db.getTask(taskId, "full");
         expect(task?.work_in_progress).toBeDefined();
         const parsedWip = JSON.parse(task!.work_in_progress!);
         expect(parsedWip.phase).toBe("testing");
@@ -1932,7 +1932,7 @@ describe("MCP Server", () => {
           wip_data: { phase: "testing", next_step: "Run tests" },
         });
 
-        const task = db.getTask(taskId);
+        const task = db.getTask(taskId, "full");
         const parsedWip = JSON.parse(task!.work_in_progress!);
         expect(parsedWip.phase).toBe("testing"); // Overwritten
         expect(parsedWip.files_modified).toEqual(["file1.ts"]); // Preserved
@@ -1990,7 +1990,7 @@ describe("MCP Server", () => {
 
         expect(result.success).toBe(true);
 
-        const task = db.getTask(taskId);
+        const task = db.getTask(taskId, "full");
         const parsedWip = JSON.parse(task!.work_in_progress!);
         expect(parsedWip.test_results.passed).toBe(12);
         expect(parsedWip.decisions[0].decision).toBe("JWT over sessions");

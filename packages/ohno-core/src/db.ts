@@ -30,6 +30,7 @@ import type {
   UpdateStatusResult,
   Epic,
   Story,
+  FieldSet,
 } from "./types.js";
 import {
   generateTaskId,
@@ -307,8 +308,20 @@ export class TaskDatabase {
   /**
    * Get a single task by ID
    */
-  getTask(taskId: string): Task | null {
-    const stmt = this.db.prepare(GET_TASK_BY_ID);
+  getTask(taskId: string, fields: FieldSet = "standard"): Task | null {
+    // Build SELECT clause based on fields parameter
+    const fieldSet = FIELD_SETS[fields] || FIELD_SETS.standard;
+    const selectClause = fieldSet.join(", ");
+
+    const sql = `
+      SELECT ${selectClause}
+      FROM tasks t
+      LEFT JOIN stories s ON t.story_id = s.id
+      LEFT JOIN epics e ON s.epic_id = e.id
+      WHERE t.id = ?
+    `;
+
+    const stmt = this.db.prepare(sql);
     stmt.bind([taskId]);
 
     if (stmt.step()) {
@@ -327,13 +340,13 @@ export class TaskDatabase {
    */
   getNextTask(): Task | null {
     // First, check for in-progress tasks
-    const inProgress = this.getTasks({ status: "in_progress", limit: 1 });
+    const inProgress = this.getTasks({ status: "in_progress", limit: 1, fields: "standard" });
     if (inProgress.length > 0) {
       return inProgress[0];
     }
 
     // Get todo tasks and filter out those with blocking dependencies
-    const todoTasks = this.getTasks({ status: "todo", limit: 20 });
+    const todoTasks = this.getTasks({ status: "todo", limit: 20, fields: "standard" });
     const availableTasks = todoTasks.filter(
       (task) => !this.isTaskBlockedByDependencies(task.id)
     );
@@ -404,8 +417,8 @@ export class TaskDatabase {
    */
   getSessionContext(): SessionContext {
     return {
-      in_progress_tasks: this.getTasks({ status: "in_progress", limit: 10 }),
-      blocked_tasks: this.getTasks({ status: "blocked", limit: 10 }),
+      in_progress_tasks: this.getTasks({ status: "in_progress", limit: 10, fields: "minimal" }),
+      blocked_tasks: this.getTasks({ status: "blocked", limit: 10, fields: "minimal" }),
       recent_activity: this.getRecentActivity(10),
       suggested_next_task: this.getNextTask() ?? undefined,
     };
@@ -1084,7 +1097,7 @@ export class TaskDatabase {
    * Merges wipData into existing work_in_progress (shallow merge)
    */
   updateTaskWip(taskId: string, wipData: Record<string, unknown>, actor?: string): boolean {
-    const task = this.getTask(taskId);
+    const task = this.getTask(taskId, "full");
     if (!task) {
       return false;
     }

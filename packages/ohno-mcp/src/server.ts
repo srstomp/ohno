@@ -25,6 +25,11 @@ const TaskIdSchema = z.object({
   task_id: z.string().min(1),
 });
 
+const GetTaskSchema = z.object({
+  task_id: z.string().min(1),
+  fields: z.enum(["minimal", "standard", "full"]).default("standard"),
+});
+
 const UpdateStatusSchema = z.object({
   task_id: z.string().min(1),
   status: z.enum(["todo", "in_progress", "review", "done", "blocked"]),
@@ -196,11 +201,17 @@ const TOOLS = [
   },
   {
     name: "get_task",
-    description: "Get full details for a specific task by ID",
+    description: "Get task details by ID. Use fields parameter to control response size: minimal (id, title, status), standard (adds description, handoff_notes, metadata), full (all fields including context_summary, wip).",
     inputSchema: {
       type: "object" as const,
       properties: {
         task_id: { type: "string", description: "Task ID" },
+        fields: {
+          type: "string",
+          enum: ["minimal", "standard", "full"],
+          description: "Field set to return (default: standard)",
+          default: "standard",
+        },
       },
       required: ["task_id"],
     },
@@ -618,8 +629,8 @@ export async function handleTool(name: string, args: Record<string, unknown>): P
     }
 
     case "get_task": {
-      const parsed = TaskIdSchema.parse(args);
-      const task = database.getTask(parsed.task_id);
+      const parsed = GetTaskSchema.parse(args);
+      const task = database.getTask(parsed.task_id, parsed.fields);
       if (!task) {
         return { error: `Task not found: ${parsed.task_id}` };
       }
