@@ -343,8 +343,8 @@ export class TaskDatabase {
    * Logic: continue in_progress OR suggest highest priority todo without blocking deps
    */
   getNextTask(): Task | null {
-    // First, check for in-progress tasks
-    const inProgress = this.getTasks({ status: "in_progress", limit: 1, fields: "standard" });
+    // First, check for in-progress tasks (use full fields to include WIP data)
+    const inProgress = this.getTasks({ status: "in_progress", limit: 1, fields: "full" });
     if (inProgress.length > 0) {
       return inProgress[0];
     }
@@ -421,7 +421,7 @@ export class TaskDatabase {
    */
   getSessionContext(): SessionContext {
     return {
-      in_progress_tasks: this.getTasks({ status: "in_progress", limit: 10, fields: "minimal" }),
+      in_progress_tasks: this.getTasks({ status: "in_progress", limit: 10, fields: "full" }),
       blocked_tasks: this.getTasks({ status: "blocked", limit: 10, fields: "minimal" }),
       recent_activity: this.getRecentActivity(10),
       suggested_next_task: this.getNextTask() ?? undefined,
