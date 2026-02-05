@@ -63,7 +63,7 @@ Ohno provides multiple integration options:
 
 | Feature | Description | Technical Details |
 |---------|-------------|-------------------|
-| **Multi-Channel Access** | Access task state via MCP tools, CLI commands, or visual board | MCP server (20 tools), CLI (14 commands), HTTP server with live reload |
+| **Multi-Channel Access** | Access task state via MCP tools, CLI commands, or visual board | MCP server (36 tools), CLI (26 commands), HTTP server with live reload |
 | **Session Continuity** | Survive context compaction and session boundaries | Persistent SQLite database with handoff notes, context summaries, and activity logs |
 | **Zero Installation** | Run without install via npx | Published to npm as `@stevestomp/ohno-cli` and `@stevestomp/ohno-mcp` |
 | **No Native Dependencies** | Works on any Node.js version without build tools | Pure JavaScript SQLite (sql.js/WebAssembly) - no compilation required |
@@ -98,7 +98,7 @@ Ohno provides multiple integration options:
 
 | Feature | Description | Technical Details |
 |---------|-------------|-------------------|
-| **MCP Native** | First-class Claude Code integration | Implements Model Context Protocol with 20 tools |
+| **MCP Native** | First-class Claude Code integration | Implements Model Context Protocol with 36 tools |
 | **GitHub Actions** | Ready for CI/CD | Install script via `/install-github-app` command |
 | **CLI Automation** | Scriptable task management | Shell commands with exit codes and JSON output |
 | **Local-First** | No cloud dependencies | SQLite database in `.ohno/tasks.db` |
@@ -195,9 +195,11 @@ Run `npx @stevestomp/ohno-cli serve` to view tasks at http://localhost:3333/kanb
 | `get_session_context()` | **Start here** - in-progress tasks, blockers, recent activity |
 | `get_project_status()` | Overall progress statistics |
 | `get_tasks(status?, priority?, fields?)` | List tasks with filtering. `fields`: `"minimal"` (default), `"standard"`, `"full"` |
-| `get_task(task_id)` | Full details for a specific task |
+| `get_task(task_id, fields?)` | Task details. `fields`: `"minimal"`, `"standard"` (default), `"full"` |
 | `get_next_task()` | Recommended task based on priority |
+| `get_next_batch(batch_size?)` | Batch of ready tasks (1-5, default 3). Includes rework tasks with failure context |
 | `get_blocked_tasks()` | All blocked tasks with reasons |
+| `get_kanban_board(include_done?, limit_per_column?)` | Tasks organized by status columns |
 
 ### Update Tools
 
@@ -209,6 +211,9 @@ Run `npx @stevestomp/ohno-cli serve` to view tasks at http://localhost:3333/kanb
 | `add_task_activity(task_id, type, desc)` | Log activity (note/decision/progress) |
 | `set_blocker(task_id, reason)` | Mark task as blocked |
 | `resolve_blocker(task_id)` | Clear blocker, resume work |
+| `set_needs_rework(task_id, value)` | Mark task for rework or clear the flag |
+| `update_task_wip(task_id, wip_data)` | Update work-in-progress metadata |
+| `record_task_failure(task_id, failure_type, reason)` | Record failure for pattern learning |
 
 ### Completion Boundaries
 
@@ -237,10 +242,35 @@ See [pokayokay](https://github.com/srstomp/pokayokay) for hook integration examp
 
 | Tool | Description |
 |------|-------------|
+| `create_epic(title, priority?, description?)` | Create a new epic |
+| `get_epic(epic_id)` | Get epic details |
+| `get_epics(status?, priority?)` | List epics with filtering |
+| `update_epic(epic_id, ...)` | Update epic fields |
 | `create_story(title, epic_id?, description?)` | Create a new story to organize tasks under |
+| `get_story(story_id)` | Get story details |
+| `list_stories(epic_id?, status?)` | List stories with filtering |
+| `update_story(story_id, ...)` | Update story fields |
 | `create_task(title, story_id?, source?, ...)` | Create new task with optional source tracking |
 | `update_task(task_id, ...)` | Modify task details |
 | `archive_task(task_id, reason)` | Archive task no longer needed |
+
+### Dependency Tools
+
+| Tool | Description |
+|------|-------------|
+| `add_dependency(task_id, depends_on_task_id)` | Create dependency between tasks |
+| `remove_dependency(task_id, depends_on_task_id)` | Remove dependency |
+| `get_task_dependencies(task_id)` | List dependencies with blocking status |
+
+### Activity & Handoff Tools
+
+| Tool | Description |
+|------|-------------|
+| `summarize_task_activity(task_id)` | Summarize activity to reduce context size |
+| `set_task_handoff(task_id, status, summary)` | Store handoff data from a subagent |
+| `get_task_handoff(task_id, include_details?)` | Retrieve task handoff data |
+| `compact_story_handoffs(story_id)` | Compact handoffs for a completed story |
+| `delete_epic_handoffs(epic_id)` | Delete handoffs for a completed epic |
 
 #### Task Source Tracking
 
@@ -274,6 +304,8 @@ This enables filtering and analytics on how tasks enter the system, particularly
 ```bash
 ohno serve              # Start visual board server
 ohno serve --port 8080  # Custom port
+ohno kanban             # Display kanban board in terminal
+ohno kanban --watch     # Live updating terminal kanban
 ohno status             # Show project stats
 ohno status --json      # Machine-readable output
 ohno sync               # One-time HTML generation (for CI/CD)
@@ -302,20 +334,49 @@ ohno unblock task-abc                        # Resolve blocker
 ohno dep add task-b task-a      # task-b depends on task-a
 ohno dep rm task-b task-a       # Remove dependency
 ohno dep list task-b            # Show dependencies
-
-# AI Agent commands (for session continuity)
-ohno context --json             # Get session context
-ohno next --json                # Get next recommended task
 ```
 
-### Features
+### Epic & Story Commands
+
+```bash
+# Epics
+ohno epics                          # List all epics
+ohno epics -s in_progress -p P0     # Filter by status and priority
+ohno epic create "Auth System"      # Create epic
+ohno epic get E-abc123              # Get epic details
+ohno epic update E-abc --status done  # Update epic
+ohno epic delete E-abc              # Delete epic (cascades to stories/tasks)
+
+# Stories
+ohno stories                        # List all stories
+ohno stories -e E-abc123            # Filter by epic
+ohno story create "Login Flow"      # Create story
+ohno story get S-abc123             # Get story details
+ohno story update S-abc --status done  # Update story
+ohno story delete S-abc             # Delete story (cascades to tasks)
+```
+
+### AI Agent & Handoff Commands
+
+```bash
+ohno context --json                 # Get session context
+ohno next --json                    # Get next recommended task
+ohno update-wip task-abc '{"key":"value"}'  # Update WIP metadata
+ohno set-handoff task-abc PASS "summary"    # Store handoff data
+ohno compact-handoffs S-abc         # Compact handoffs for completed story
+ohno delete-handoffs E-abc          # Delete handoffs for completed epic
+```
+
+### CLI Features
 
 - **Zero install** - `npx @stevestomp/ohno-cli` just works
 - **Live reload** - Watches tasks.db, auto-refreshes browser
+- **Terminal kanban** - `ohno kanban` for in-terminal board with optional live mode
 - **Edit/Delete** - Edit task details or delete tasks directly from the board
 - **Self-contained HTML** - No external assets
 - **Detail panel** - Click any task for full details, files, activity history
 - **JSON output** - All commands support `--json` for machine parsing
+- **Full hierarchy** - Manage epics, stories, and tasks via CLI
 - **Universal** - Works with any AI agent that has shell access
 
 ## Database Schema
@@ -325,16 +386,19 @@ All tools share the same SQLite database (`.ohno/tasks.db`):
 ```sql
 -- Core tables
 projects (id, name, ...)
-epics    (id, title, priority, ...)
+epics    (id, title, priority, status, ...)
 stories  (id, epic_id, title, status, ...)
 tasks    (id, story_id, title, status, task_type, estimate_hours,
           description, context_summary, working_files, blockers,
-          handoff_notes, progress_percent, ...)
+          handoff_notes, progress_percent, needs_rework,
+          work_in_progress, source, ...)
 
--- Extended tables (for activity tracking)
-task_activity    (id, task_id, activity_type, description, ...)
-task_files       (id, task_id, file_path, file_type, ...)
-task_dependencies (id, task_id, depends_on_task_id, ...)
+-- Extended tables
+task_activity     (id, task_id, activity_type, description, ...)
+task_files        (id, task_id, file_path, file_type, ...)
+task_dependencies (id, task_id, depends_on_task_id, dependency_type, ...)
+task_failures     (id, task_id, failure_type, failure_reason, attempt, ...)
+task_handoffs     (task_id, status, summary, files_changed, full_details, ...)
 ```
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for full schema details.
@@ -344,8 +408,8 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for full schema details.
 ```
 packages/
 ├── ohno-core/    # Shared database layer (TypeScript)
-├── ohno-mcp/     # MCP server with 20 tools
-└── ohno-cli/     # CLI with 14 commands
+├── ohno-mcp/     # MCP server with 36 tools
+└── ohno-cli/     # CLI with 26 commands
 ```
 
 ## License

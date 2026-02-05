@@ -42,9 +42,9 @@ Ohno is a TypeScript monorepo providing task management for AI agent workflows w
 **Structure:**
 ```
 packages/
-├── ohno-core/       # Shared database layer (better-sqlite3)
-├── ohno-mcp/        # MCP server (20 tools)
-└── ohno-cli/        # CLI tool (17 commands)
+├── ohno-core/       # Shared database layer (sql.js)
+├── ohno-mcp/        # MCP server (36 tools)
+└── ohno-cli/        # CLI tool (26 commands)
 ```
 
 **Rationale:**
@@ -58,7 +58,7 @@ packages/
 
 | Package | Description | Published As | Dependencies |
 |---------|-------------|--------------|--------------|
-| `ohno-core` | SQLite database layer, schema, utilities | `@stevestomp/ohno-core` | better-sqlite3 |
+| `ohno-core` | SQLite database layer, schema, utilities | `@stevestomp/ohno-core` | sql.js |
 | `ohno-mcp` | MCP server for Claude Code | `@stevestomp/ohno-mcp` | @modelcontextprotocol/sdk, zod, ohno-core |
 | `ohno-cli` | CLI + HTTP server + kanban generator | `@stevestomp/ohno-cli` | commander, chokidar, ohno-core |
 
@@ -71,14 +71,14 @@ packages/
 |-----------|--------|-------|
 | Distribution | 9/10 | NPM + npx provides zero-install experience |
 | Type Safety | 10/10 | Full type checking across packages |
-| Ecosystem | 10/10 | Rich ecosystem (Commander, Chokidar, better-sqlite3) |
+| Ecosystem | 10/10 | Rich ecosystem (Commander, Chokidar, sql.js) |
 | MCP Support | 10/10 | Official MCP SDK available for TypeScript |
 | Cross-Platform | 10/10 | Works on macOS, Linux, Windows |
 | Developer Experience | 9/10 | Excellent tooling (tsc, Vitest, tsx) |
 
 **Key factors:**
 - MCP SDK officially supports TypeScript/Node.js
-- better-sqlite3 provides native performance with Node.js bindings
+- sql.js provides SQLite via WebAssembly (no native compilation required)
 - Commander.js simplifies CLI development
 - Chokidar provides cross-platform file watching
 - Zero-install via `npx @stevestomp/ohno-cli` and `npx @stevestomp/ohno-mcp`
@@ -87,7 +87,7 @@ packages/
 
 ### 3. Database Layer (ohno-core)
 
-**Decision: SQLite via better-sqlite3 with shared schema**
+**Decision: SQLite via sql.js with shared schema**
 
 **Exports:**
 - `TaskDatabase` class (CRUD operations)
@@ -96,7 +96,7 @@ packages/
 - Schema constants (CREATE_* SQL statements)
 
 **Key Features:**
-- Synchronous API (better-sqlite3) - simpler than async
+- Synchronous API (sql.js) - simpler than async
 - Automatic schema migration (adds columns if missing)
 - Transaction support for consistency
 - Prepared statements for performance
@@ -111,6 +111,8 @@ tasks                 -- Individual work items
 task_activity         -- Activity log (audit trail)
 task_files            -- Associated files
 task_dependencies     -- Task relationships (blocks, requires, relates_to)
+task_failures         -- Failure pattern tracking (for kaizen integration)
+task_handoffs         -- Handoff session tracking (subagent reporting)
 ```
 
 **Design Philosophy:**
@@ -121,17 +123,20 @@ task_dependencies     -- Task relationships (blocks, requires, relates_to)
 
 ### 4. MCP Server (ohno-mcp)
 
-**Decision: Model Context Protocol server with 20 tools**
+**Decision: Model Context Protocol server with 36 tools**
 
 **Tool Categories:**
 
 | Category | Tools | Purpose |
 |----------|-------|---------|
-| **Query** | get_project_status, get_session_context, get_tasks, get_task, get_next_task, get_blocked_tasks | Read task state |
-| **Status Updates** | update_task_status, update_task_progress, set_blocker, resolve_blocker | Track progress |
-| **Activity Logging** | add_task_activity, set_handoff_notes, summarize_task_activity | Session continuity |
-| **CRUD** | create_story, create_task, update_task, archive_task | Manage stories and tasks |
+| **Query** | get_project_status, get_session_context, get_tasks, get_task, get_next_task, get_next_batch, get_blocked_tasks, get_kanban_board | Read task state |
+| **Status Updates** | update_task_status, update_task_progress, set_blocker, resolve_blocker, set_needs_rework, update_task_wip | Track progress |
+| **Activity Logging** | add_task_activity, set_handoff_notes, summarize_task_activity, record_task_failure | Session continuity |
+| **Task CRUD** | create_task, update_task, archive_task | Manage tasks |
+| **Story CRUD** | create_story, get_story, list_stories, update_story | Manage stories |
+| **Epic CRUD** | create_epic, get_epic, get_epics, update_epic | Manage epics |
 | **Dependencies** | add_dependency, remove_dependency, get_task_dependencies | Task relationships |
+| **Handoffs** | set_task_handoff, get_task_handoff, compact_story_handoffs, delete_epic_handoffs | Subagent handoff data |
 
 **Key Features:**
 - Zod schema validation for all tool parameters
@@ -153,16 +158,18 @@ task_dependencies     -- Task relationships (blocks, requires, relates_to)
 
 ### 5. CLI Tool (ohno-cli)
 
-**Decision: Commander.js CLI with 17 commands**
+**Decision: Commander.js CLI with 26 commands**
 
 **Command Categories:**
 
 | Category | Commands | Purpose |
 |----------|----------|---------|
-| **Visualization** | serve, sync, status, init | Kanban board + setup |
-| **Task Management** | tasks, task, create, start, done, review, block, unblock | CRUD operations |
+| **Visualization** | serve, sync, kanban, status, init | Kanban board + setup |
+| **Task Management** | tasks, task, create, start, done, review, block, unblock | Task CRUD operations |
+| **Epic Management** | epics, epic get/create/update/delete | Epic CRUD operations |
+| **Story Management** | stories, story get/create/update/delete | Story CRUD operations |
 | **Dependencies** | dep add, dep rm, dep list | Relationship management |
-| **AI Agent** | context, next | Session continuity |
+| **AI Agent** | context, next, update-wip, set-handoff, compact-handoffs, delete-handoffs | Session continuity + handoffs |
 
 **Key Features:**
 - `--json` flag on all commands for machine parsing
@@ -256,7 +263,7 @@ NO_COLOR=1                  # Disable colored output (standard)
 | Concern | Mitigation |
 |---------|------------|
 | XSS in task titles | HTML escaping in template generation |
-| SQL injection | Prepared statements (better-sqlite3) |
+| SQL injection | Prepared statements via sql.js |
 | Path traversal | HTTP server restricted to .ohno/ directory |
 | Network exposure | Bind to 127.0.0.1 by default (localhost only) |
 | Dependency vulnerabilities | Regular npm audit, pinned versions |
@@ -281,7 +288,7 @@ NO_COLOR=1                  # Disable colored output (standard)
 - Multi-project management (one .ohno per project)
 - Git hooks auto-installation (user configuration)
 - Cloud sync/backup (local-first)
-- Web-based editing (read-only visualization)
+- Complex web-based editing (board supports basic edit/delete)
 
 **Design Principle:**
 ```
@@ -332,8 +339,6 @@ CREATE TABLE tasks (
   status TEXT DEFAULT 'todo',           -- todo, in_progress, review, done, blocked
   task_type TEXT,                       -- feature, bug, chore, spike, test
   estimate_hours REAL,
-
-  -- Extended fields (v0.5+)
   description TEXT,
   context_summary TEXT,                 -- AI-generated context
   working_files TEXT,                   -- Comma-separated file paths
@@ -344,11 +349,15 @@ CREATE TABLE tasks (
   created_at TEXT,
   updated_at TEXT,
   created_by TEXT,
-  activity_summary TEXT                 -- Summarized activity log
+  activity_summary TEXT,                -- Summarized activity log
+  source TEXT DEFAULT 'human',          -- human, pokayokay-plan, kaizen-fix, kaizen-suggest
+  needs_rework INTEGER DEFAULT 0,       -- Flag for tasks needing retry
+  work_in_progress TEXT,                -- JSON WIP metadata
+  wip_updated_at TEXT
 );
 ```
 
-### Extended Schema (v0.5+)
+### Extended Schema
 
 ```sql
 CREATE TABLE task_activity (
@@ -377,6 +386,25 @@ CREATE TABLE task_dependencies (
   dependency_type TEXT DEFAULT 'blocks',  -- blocks, requires, relates_to
   created_at TEXT
 );
+
+CREATE TABLE task_failures (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL,
+  failure_type TEXT NOT NULL,    -- spec, quality, implementation
+  failure_reason TEXT NOT NULL,
+  attempt INTEGER,
+  created_at TEXT
+);
+
+CREATE TABLE task_handoffs (
+  task_id TEXT PRIMARY KEY,
+  status TEXT NOT NULL,          -- PASS, FAIL, BLOCKED
+  summary TEXT NOT NULL,
+  files_changed TEXT,            -- JSON array of file paths
+  full_details TEXT,
+  created_at TEXT,
+  compacted_at TEXT
+);
 ```
 
 ### Indexes
@@ -385,8 +413,8 @@ CREATE TABLE task_dependencies (
 CREATE INDEX idx_tasks_status ON tasks(status);
 CREATE INDEX idx_tasks_story_id ON tasks(story_id);
 CREATE INDEX idx_task_activity_task_id ON task_activity(task_id);
-CREATE INDEX idx_task_files_task_id ON task_files(task_id);
 CREATE INDEX idx_task_deps_task_id ON task_dependencies(task_id);
+CREATE INDEX idx_task_failures_task_id ON task_failures(task_id);
 ```
 
 ## Distribution Strategy
@@ -413,8 +441,8 @@ npx ohno serve
 
 **Publishing:**
 - Packages published to npm under @stevestomp scope
-- Semantic versioning (v0.5.x currently)
-- Automated via GitHub Actions (future)
+- Semantic versioning (v0.16.x currently)
+- Automated via GitHub Actions
 
 ## Development Workflow
 
@@ -450,13 +478,13 @@ npm run clean
 2. Build packages: `npm run build`
 3. Update version: `npm version patch/minor/major`
 4. Publish to npm: `npm publish --workspace packages/ohno-*`
-5. Tag release: `git tag v0.5.x && git push --tags`
+5. Tag release: `git tag vX.Y.Z && git push --tags`
 
 ## Future Considerations
 
 ### Planned Features (v1.0)
 
-- [ ] GitHub Actions workflow for automated publishing
+- [x] GitHub Actions workflow for automated publishing
 - [ ] Better error messages with suggestions
 - [ ] Progress bars for long operations
 - [ ] Filtering in kanban board UI
@@ -480,7 +508,9 @@ npm run clean
 
 ## Version History
 
-- **v0.5.x** (Current): TypeScript rewrite, MCP server, monorepo
+- **v0.16.x** (Current): Epic/Story CRUD, handoff system, terminal kanban, batch operations
+- **v0.13.x**: Field selection for get_tasks/get_task, WIP metadata
+- **v0.5.x**: TypeScript rewrite, MCP server, monorepo
 - **v0.4.x**: Python implementation (deprecated)
 - **v0.1.x**: Initial Python prototype
 
