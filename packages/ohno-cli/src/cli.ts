@@ -536,7 +536,15 @@ export function createCli(): Command {
         priority: options.priority,
         description: options.description,
       });
+
+      // Verify the epic was persisted
+      const created = db.getEpic(epicId);
       db.close();
+
+      if (!created) {
+        out.error("Epic creation failed", "Record was not persisted to database");
+        process.exit(1);
+      }
 
       if (globalOpts.json) {
         out.json({ success: true, epic_id: epicId });
@@ -678,7 +686,15 @@ export function createCli(): Command {
         epic_id: options.epic,
         description: options.description,
       });
+
+      // Verify the story was persisted
+      const created = db.getStory(storyId);
       db.close();
+
+      if (!created) {
+        out.error("Story creation failed", "Record was not persisted to database");
+        process.exit(1);
+      }
 
       if (globalOpts.json) {
         out.json({ success: true, story_id: storyId });

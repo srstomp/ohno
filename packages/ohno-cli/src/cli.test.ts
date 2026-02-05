@@ -963,6 +963,191 @@ describe("CLI Commands", () => {
     });
   });
 
+  describe("epic subcommands", () => {
+    it("should create epic in JSON mode", async () => {
+      const program = createCli();
+      program.exitOverride();
+
+      await program.parseAsync([
+        "node",
+        "test",
+        "--json",
+        "-d",
+        tempDir,
+        "epic",
+        "create",
+        "New epic",
+      ]);
+
+      const output = getConsoleOutput(consoleLogSpy);
+      const parsed = JSON.parse(output);
+      expect(parsed.success).toBe(true);
+      expect(parsed.epic_id).toMatch(/^epic-[a-f0-9]{8}$/);
+    });
+
+    it("should persist epic to database", async () => {
+      const program = createCli();
+      program.exitOverride();
+
+      await program.parseAsync([
+        "node",
+        "test",
+        "--json",
+        "-d",
+        tempDir,
+        "epic",
+        "create",
+        "Persistent epic",
+        "-p",
+        "P0",
+      ]);
+
+      const output = getConsoleOutput(consoleLogSpy);
+      const parsed = JSON.parse(output);
+
+      // Reload to see changes made by CLI
+      await db.reload();
+      const epic = db.getEpic(parsed.epic_id);
+      expect(epic).not.toBeNull();
+      expect(epic?.title).toBe("Persistent epic");
+      expect(epic?.priority).toBe("P0");
+    });
+
+    it("should get epic details in JSON mode", async () => {
+      const epicId = db.createEpic({ title: "Test epic" });
+
+      const program = createCli();
+      program.exitOverride();
+
+      await program.parseAsync(["node", "test", "--json", "-d", tempDir, "epic", "get", epicId]);
+
+      const output = getConsoleOutput(consoleLogSpy);
+      const parsed = JSON.parse(output);
+      expect(parsed.id).toBe(epicId);
+      expect(parsed.title).toBe("Test epic");
+    });
+
+    it("should list epics in JSON mode", async () => {
+      db.createEpic({ title: "Epic 1" });
+      db.createEpic({ title: "Epic 2" });
+
+      const program = createCli();
+      program.exitOverride();
+
+      await program.parseAsync(["node", "test", "--json", "-d", tempDir, "epics"]);
+
+      const output = getConsoleOutput(consoleLogSpy);
+      const parsed = JSON.parse(output);
+      expect(parsed.epics).toHaveLength(2);
+    });
+  });
+
+  describe("story subcommands", () => {
+    it("should create story in JSON mode", async () => {
+      const program = createCli();
+      program.exitOverride();
+
+      await program.parseAsync([
+        "node",
+        "test",
+        "--json",
+        "-d",
+        tempDir,
+        "story",
+        "create",
+        "New story",
+      ]);
+
+      const output = getConsoleOutput(consoleLogSpy);
+      const parsed = JSON.parse(output);
+      expect(parsed.success).toBe(true);
+      expect(parsed.story_id).toMatch(/^story-[a-f0-9]{8}$/);
+    });
+
+    it("should persist story to database", async () => {
+      const epicId = db.createEpic({ title: "Parent epic" });
+
+      const program = createCli();
+      program.exitOverride();
+
+      await program.parseAsync([
+        "node",
+        "test",
+        "--json",
+        "-d",
+        tempDir,
+        "story",
+        "create",
+        "Persistent story",
+        "-e",
+        epicId,
+      ]);
+
+      const output = getConsoleOutput(consoleLogSpy);
+      const parsed = JSON.parse(output);
+
+      // Reload to see changes made by CLI
+      await db.reload();
+      const story = db.getStory(parsed.story_id);
+      expect(story).not.toBeNull();
+      expect(story?.title).toBe("Persistent story");
+      expect(story?.epic_id).toBe(epicId);
+    });
+
+    it("should get story details in JSON mode", async () => {
+      const storyId = db.createStory({ title: "Test story" });
+
+      const program = createCli();
+      program.exitOverride();
+
+      await program.parseAsync(["node", "test", "--json", "-d", tempDir, "story", "get", storyId]);
+
+      const output = getConsoleOutput(consoleLogSpy);
+      const parsed = JSON.parse(output);
+      expect(parsed.id).toBe(storyId);
+      expect(parsed.title).toBe("Test story");
+    });
+
+    it("should list stories in JSON mode", async () => {
+      db.createStory({ title: "Story 1" });
+      db.createStory({ title: "Story 2" });
+
+      const program = createCli();
+      program.exitOverride();
+
+      await program.parseAsync(["node", "test", "--json", "-d", tempDir, "stories"]);
+
+      const output = getConsoleOutput(consoleLogSpy);
+      const parsed = JSON.parse(output);
+      expect(parsed.stories).toHaveLength(2);
+    });
+
+    it("should filter stories by epic", async () => {
+      const epicId = db.createEpic({ title: "Epic" });
+      db.createStory({ title: "Story with epic", epic_id: epicId });
+      db.createStory({ title: "Orphan story" });
+
+      const program = createCli();
+      program.exitOverride();
+
+      await program.parseAsync([
+        "node",
+        "test",
+        "--json",
+        "-d",
+        tempDir,
+        "stories",
+        "-e",
+        epicId,
+      ]);
+
+      const output = getConsoleOutput(consoleLogSpy);
+      const parsed = JSON.parse(output);
+      expect(parsed.stories).toHaveLength(1);
+      expect(parsed.stories[0].title).toBe("Story with epic");
+    });
+  });
+
   describe("kanban command", () => {
     it("should have kanban command", () => {
       const program = createCli();
