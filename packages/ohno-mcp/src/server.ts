@@ -249,7 +249,7 @@ const TOOLS = [
   },
   {
     name: "get_next_batch",
-    description: "Get a batch of up to N tasks ready for immediate execution. Returns tasks with status=todo or needs_rework=1, excluding tasks with unmet dependencies. Tasks are ordered by epic priority (P0 first) then creation date. Tasks needing rework include failure_context with previous failure details.",
+    description: "Get a batch of up to N tasks ready for immediate execution, backed by a pre-computed work queue. Returns tasks with status=todo or needs_rework=1, excluding tasks with unmet dependencies. Tasks are ordered by priority score (epic priority + age + blocks bonus). Tasks needing rework include failure_context with previous failure details.",
     inputSchema: {
       type: "object" as const,
       properties: {
