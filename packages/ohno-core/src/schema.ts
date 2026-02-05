@@ -156,6 +156,19 @@ CREATE TABLE IF NOT EXISTS task_handoffs (
 )`;
 
 /**
+ * SQL to create the work_queue table (pre-computed task prioritization)
+ */
+export const CREATE_WORK_QUEUE_TABLE = `
+CREATE TABLE IF NOT EXISTS work_queue (
+  task_id TEXT PRIMARY KEY,
+  priority_score REAL NOT NULL,
+  batch_group INTEGER NOT NULL DEFAULT 0,
+  blocked_by TEXT,
+  ready INTEGER NOT NULL DEFAULT 1,
+  computed_at TEXT NOT NULL
+)`;
+
+/**
  * Indexes for performance
  */
 export const CREATE_INDEXES = [
@@ -164,6 +177,7 @@ export const CREATE_INDEXES = [
   "CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)",
   "CREATE INDEX IF NOT EXISTS idx_tasks_story_id ON tasks(story_id)",
   "CREATE INDEX IF NOT EXISTS idx_task_failures_task_id ON task_failures(task_id)",
+  "CREATE INDEX IF NOT EXISTS idx_work_queue_ready ON work_queue(ready, priority_score DESC)",
 ];
 
 /**

@@ -33,6 +33,7 @@ export type {
   StoryStatus,
   UpdateStoryOptions,
   FieldSet,
+  WorkQueueEntry,
 } from "./types.js";
 
 export { toDict } from "./types.js";
@@ -59,6 +60,7 @@ export {
   CREATE_TASK_DEPENDENCIES_TABLE,
   CREATE_TASK_FAILURES_TABLE,
   CREATE_TASK_HANDOFFS_TABLE,
+  CREATE_WORK_QUEUE_TABLE,
   CREATE_INDEXES,
   EXTENDED_TASK_COLUMNS,
   FIELD_SETS,
