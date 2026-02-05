@@ -47,7 +47,7 @@ Ohno provides multiple interfaces for integration:
 |-----------|----------|------------------|
 | **ohno-mcp** | Model Context Protocol | Claude Code, AI agents with MCP support |
 | **ohno-cli** | Shell commands | pokayokay hooks, any AI agent, humans |
-| **ohno serve** | HTTP + WebSocket | Human visualization via browser |
+| **ohno serve** | HTTP + file watcher (polling) | Human visualization via browser |
 
 ---
 
@@ -284,22 +284,31 @@ Pokayokay pauses at story boundary (semi-auto mode):
 
 ## API Reference
 
-### MCP Tools (ohno-mcp)
+### MCP Tools (ohno-mcp) - Key Integration Tools
 
 | Tool | Purpose |
 |------|---------|
 | `get_session_context` | Get in-progress tasks, blockers, suggested next task |
 | `get_next_task` | Get highest priority available task |
-| `get_task` | Get full task details by ID |
-| `update_task_status` | Change task status (todo/in_progress/review/done/blocked) |
-| `create_task` | Create new task |
+| `get_next_batch` | Get batch of ready tasks (1-5) for parallel dispatch |
+| `get_task` | Get task details by ID (supports field selection) |
+| `get_tasks` | List tasks with status/priority filtering |
+| `update_task_status` | Change task status. Returns boundary metadata on completion |
+| `create_task` | Create new task (with source tracking) |
+| `create_story` / `create_epic` | Create stories and epics for hierarchy |
 | `add_task_activity` | Log activity on a task |
-| `set_blocker` | Mark task as blocked with reason |
-| `resolve_blocker` | Clear blocker and set to in_progress |
-| `add_dependency` | Create dependency between tasks |
+| `set_blocker` / `resolve_blocker` | Manage blockers |
+| `set_needs_rework` | Mark task for rework retry |
+| `record_task_failure` | Record failure for pattern learning |
+| `set_task_handoff` / `get_task_handoff` | Store/retrieve subagent handoff data |
+| `compact_story_handoffs` / `delete_epic_handoffs` | Lifecycle cleanup |
+| `add_dependency` / `remove_dependency` | Manage task dependencies |
 | `get_project_status` | Get overall completion stats |
+| `get_kanban_board` | Tasks organized by status columns |
 
-### CLI Commands (ohno-cli)
+See [README](../README.md) for the full 36-tool reference.
+
+### CLI Commands (ohno-cli) - Key Integration Commands
 
 | Command | Purpose |
 |---------|---------|
@@ -311,7 +320,10 @@ Pokayokay pauses at story boundary (semi-auto mode):
 | `npx @stevestomp/ohno-cli create <title>` | Create task |
 | `npx @stevestomp/ohno-cli dep add <from> <to>` | Add dependency |
 | `npx @stevestomp/ohno-cli tasks` | List all tasks |
+| `npx @stevestomp/ohno-cli set-handoff <id> <status> <summary>` | Store handoff data |
 | `npx @stevestomp/ohno-cli serve` | Start kanban board |
+
+See [README](../README.md) for the full 26-command reference.
 
 ---
 
