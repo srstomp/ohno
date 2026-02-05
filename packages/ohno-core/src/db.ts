@@ -15,6 +15,7 @@ import type {
   TaskFailure,
   TaskHandoff,
   BatchTask,
+  WorkQueueEntry,
   ProjectStatus,
   SessionContext,
   CreateTaskOptions,
@@ -54,6 +55,7 @@ import {
   CREATE_TASK_DEPENDENCIES_TABLE,
   CREATE_TASK_FAILURES_TABLE,
   CREATE_TASK_HANDOFFS_TABLE,
+  CREATE_WORK_QUEUE_TABLE,
   CREATE_INDEXES,
   EXTENDED_TASK_COLUMNS,
   GET_TASK_BY_ID,
@@ -157,6 +159,7 @@ export class TaskDatabase {
     this.db.run(CREATE_TASK_DEPENDENCIES_TABLE);
     this.db.run(CREATE_TASK_FAILURES_TABLE);
     this.db.run(CREATE_TASK_HANDOFFS_TABLE);
+    this.db.run(CREATE_WORK_QUEUE_TABLE);
 
     // Add extended columns if missing (backwards compatibility)
     for (const [colName, colType] of EXTENDED_TASK_COLUMNS) {
@@ -375,7 +378,45 @@ export class TaskDatabase {
   getNextBatch(size: number = 3): BatchTask[] {
     const maxSize = Math.min(size, 5);
 
-    // Get candidates: todo OR needs_rework
+    // Use pre-computed work queue for fast retrieval
+    const sql = `
+      SELECT t.*, e.priority as epic_priority, wq.priority_score
+      FROM work_queue wq
+      JOIN tasks t ON wq.task_id = t.id
+      LEFT JOIN stories s ON t.story_id = s.id
+      LEFT JOIN epics e ON s.epic_id = e.id
+      WHERE wq.ready = 1
+        AND (t.status = 'todo' OR t.needs_rework = 1)
+        AND t.status != 'archived'
+      ORDER BY wq.priority_score DESC
+      LIMIT ?
+    `;
+
+    const stmt = this.db.prepare(sql);
+    stmt.bind([maxSize]);
+    const batch: BatchTask[] = [];
+    while (stmt.step()) {
+      const task = stmt.getAsObject() as unknown as Task;
+      batch.push({
+        ...task,
+        failure_context: task.needs_rework ? this.getTaskFailures(task.id) : undefined,
+      });
+    }
+    stmt.free();
+
+    // Fallback: if queue is empty (first run or stale), rebuild and retry
+    if (batch.length === 0) {
+      this.rebuildWorkQueue();
+      return this.getNextBatchFallback(maxSize);
+    }
+
+    return batch;
+  }
+
+  /**
+   * Fallback batch retrieval without work queue (used during queue rebuild)
+   */
+  private getNextBatchFallback(maxSize: number): BatchTask[] {
     const sql = `
       SELECT t.*, e.priority as epic_priority
       FROM tasks t
@@ -395,14 +436,9 @@ export class TaskDatabase {
 
     const result = this.db.exec(sql);
     const candidates = resultToObjects<Task>(result);
-
-    // Filter out blocked tasks
     const available = candidates.filter((task) => !this.isTaskBlockedByDependencies(task.id));
-
-    // Take up to maxSize
     const batch = available.slice(0, maxSize);
 
-    // Attach failure context for needs_rework tasks
     return batch.map((task) => ({
       ...task,
       failure_context: task.needs_rework ? this.getTaskFailures(task.id) : undefined,
@@ -612,6 +648,9 @@ export class TaskDatabase {
 
     // Log activity
     this.addTaskActivity(taskId, "created", `Task created: ${opts.title}`, opts.actor);
+
+    // Add to work queue
+    this.recomputeQueueEntry(taskId);
 
     this.save();
     return taskId;
@@ -967,6 +1006,12 @@ export class TaskDatabase {
         this.summarizeTaskActivity(taskId);
       }
 
+      // Update work queue: remove completed/in-progress tasks, recompute dependents
+      this.recomputeQueueEntry(taskId);
+      if (status === "done" || status === "archived") {
+        this.recomputeQueueDependents(taskId);
+      }
+
       this.save();
 
       // Return boundary metadata when marking as done or archived
@@ -1090,6 +1135,7 @@ export class TaskDatabase {
         `Task ${value ? "marked as" : "cleared from"} needs rework`,
         actor
       );
+      this.recomputeQueueEntry(taskId);
       this.save();
     }
 
@@ -1151,6 +1197,7 @@ export class TaskDatabase {
         `Task archived${reason ? `: ${reason}` : ""}`,
         actor
       );
+      this.recomputeQueueEntry(taskId);
       this.save();
     }
 
@@ -1165,6 +1212,7 @@ export class TaskDatabase {
     this.db.run("DELETE FROM task_activity WHERE task_id = ?", [taskId]);
     this.db.run("DELETE FROM task_files WHERE task_id = ?", [taskId]);
     this.db.run("DELETE FROM task_dependencies WHERE task_id = ? OR depends_on_task_id = ?", [taskId, taskId]);
+    this.db.run("DELETE FROM work_queue WHERE task_id = ?", [taskId]);
 
     this.db.run("DELETE FROM tasks WHERE id = ?", [taskId]);
     const changes = this.db.getRowsModified();
@@ -1282,6 +1330,11 @@ export class TaskDatabase {
     `;
 
     this.db.run(sql, [depId, taskId, dependsOnTaskId, dependencyType, getTimestamp()]);
+
+    // Recompute both tasks in work queue
+    this.recomputeQueueEntry(taskId);
+    this.recomputeQueueEntry(dependsOnTaskId);
+
     this.save();
 
     return depId;
@@ -1299,6 +1352,9 @@ export class TaskDatabase {
     const changes = this.db.getRowsModified();
 
     if (changes > 0) {
+      // Recompute both tasks in work queue
+      this.recomputeQueueEntry(taskId);
+      this.recomputeQueueEntry(dependsOnTaskId);
       this.save();
     }
 
@@ -1605,5 +1661,133 @@ export class TaskDatabase {
 
     if (deleted > 0) this.save();
     return deleted;
+  }
+
+  // ==========================================================================
+  // Work Queue Methods
+  // ==========================================================================
+
+  /**
+   * Compute priority score for a task.
+   * Higher score = higher priority.
+   *
+   * Factors:
+   * - Epic priority: P0=1000, P1=750, P2=500, P3=250
+   * - Age bonus: up to 100 points based on task age
+   * - Blocks bonus: +50 per task this one blocks (unblocking others is valuable)
+   */
+  computePriorityScore(taskId: string): number {
+    const task = this.getTask(taskId);
+    if (!task) return 0;
+
+    // Epic priority base score
+    const priorityMap: Record<string, number> = { P0: 1000, P1: 750, P2: 500, P3: 250 };
+    const epicPriority = task.epic_priority ?? "P2";
+    let score = priorityMap[epicPriority] ?? 500;
+
+    // Age bonus: older tasks get slight priority boost (up to 100 points over 30 days)
+    if (task.created_at) {
+      const ageMs = Date.now() - new Date(task.created_at).getTime();
+      const ageDays = ageMs / (1000 * 60 * 60 * 24);
+      score += Math.min(ageDays * (100 / 30), 100);
+    }
+
+    // Blocks bonus: tasks that unblock others get priority
+    const blocksSql = `
+      SELECT COUNT(*) as count FROM task_dependencies
+      WHERE depends_on_task_id = ?
+    `;
+    const stmt = this.db.prepare(blocksSql);
+    stmt.bind([taskId]);
+    if (stmt.step()) {
+      const row = stmt.getAsObject() as { count: number };
+      score += (row.count ?? 0) * 50;
+    }
+    stmt.free();
+
+    return Math.round(score * 100) / 100;
+  }
+
+  /**
+   * Recompute a single task's work queue entry.
+   * Removes the entry if the task is no longer eligible (done, archived, in_progress).
+   */
+  recomputeQueueEntry(taskId: string): void {
+    const task = this.getTask(taskId);
+    if (!task) {
+      this.db.run("DELETE FROM work_queue WHERE task_id = ?", [taskId]);
+      return;
+    }
+
+    // Only queue tasks that are todo or needs_rework
+    const eligible = (task.status === "todo" || (task.needs_rework && task.status !== "archived"));
+    if (!eligible) {
+      this.db.run("DELETE FROM work_queue WHERE task_id = ?", [taskId]);
+      return;
+    }
+
+    const score = this.computePriorityScore(taskId);
+    const blockers = this.getBlockingDependencies(taskId);
+    const ready = blockers.length === 0 ? 1 : 0;
+    const blockedBy = blockers.length > 0 ? JSON.stringify(blockers) : null;
+    const timestamp = getTimestamp();
+
+    // Batch group based on epic priority tier
+    const priorityMap: Record<string, number> = { P0: 0, P1: 1, P2: 2, P3: 3 };
+    const batchGroup = priorityMap[task.epic_priority ?? "P2"] ?? 2;
+
+    this.db.run(
+      `INSERT OR REPLACE INTO work_queue (task_id, priority_score, batch_group, blocked_by, ready, computed_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [taskId, score, batchGroup, blockedBy, ready, timestamp]
+    );
+  }
+
+  /**
+   * Recompute queue entries for all tasks that depend on a given task.
+   * Called when a task completes or its status changes, to update readiness of dependents.
+   */
+  recomputeQueueDependents(taskId: string): void {
+    const sql = `
+      SELECT task_id FROM task_dependencies
+      WHERE depends_on_task_id = ?
+    `;
+    const stmt = this.db.prepare(sql);
+    stmt.bind([taskId]);
+    const dependentIds: string[] = [];
+    while (stmt.step()) {
+      const row = stmt.getAsObject() as { task_id: string };
+      dependentIds.push(row.task_id);
+    }
+    stmt.free();
+
+    for (const depId of dependentIds) {
+      this.recomputeQueueEntry(depId);
+    }
+  }
+
+  /**
+   * Full rebuild of the work queue from scratch.
+   * Called on first use or when queue is detected as stale.
+   */
+  rebuildWorkQueue(): void {
+    // Clear existing queue
+    this.db.run("DELETE FROM work_queue");
+
+    // Get all eligible tasks
+    const sql = `
+      SELECT t.id
+      FROM tasks t
+      WHERE (t.status = 'todo' OR t.needs_rework = 1)
+        AND t.status != 'archived'
+    `;
+    const result = this.db.exec(sql);
+    const tasks = resultToObjects<{ id: string }>(result);
+
+    for (const task of tasks) {
+      this.recomputeQueueEntry(task.id);
+    }
+
+    this.save();
   }
 }
