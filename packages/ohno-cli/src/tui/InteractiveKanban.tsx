@@ -3,7 +3,7 @@
  */
 
 import React, { useState, useEffect } from "react";
-import { Box, Text, useInput, useApp } from "ink";
+import { Box, Text, useInput, useApp, useStdout } from "ink";
 import { KanbanBoard } from "./KanbanBoard.js";
 import type { KanbanData } from "./kanban-data.js";
 
@@ -19,9 +19,15 @@ export function InteractiveKanban({
   onMoveTask
 }: InteractiveKanbanProps): React.ReactElement {
   const { exit } = useApp();
+  const { stdout } = useStdout();
   const [data, setData] = useState(initialData);
   const [selectedColumn, setSelectedColumn] = useState(0);
   const [selectedRow, setSelectedRow] = useState(0);
+  const [viewportStart, setViewportStart] = useState(0);
+
+  // Reserve lines for: column header border (3) + footer help (2) + scroll indicators (2)
+  const terminalRows = stdout?.rows ?? 24;
+  const maxVisible = Math.max(3, terminalRows - 7);
 
   const columns = [
     { tasks: [...data.todo, ...data.blocked], status: "todo" },
@@ -42,13 +48,23 @@ export function InteractiveKanban({
     if (key.leftArrow) {
       setSelectedColumn((c) => Math.max(0, c - 1));
       setSelectedRow(0);
+      setViewportStart(0);
     } else if (key.rightArrow) {
       setSelectedColumn((c) => Math.min(3, c + 1));
       setSelectedRow(0);
+      setViewportStart(0);
     } else if (key.upArrow) {
-      setSelectedRow((r) => Math.max(0, r - 1));
+      const newRow = Math.max(0, selectedRow - 1);
+      setSelectedRow(newRow);
+      if (newRow < viewportStart) {
+        setViewportStart(newRow);
+      }
     } else if (key.downArrow) {
-      setSelectedRow((r) => Math.min(maxRow, r + 1));
+      const newRow = Math.min(maxRow, selectedRow + 1);
+      setSelectedRow(newRow);
+      if (newRow >= viewportStart + maxVisible) {
+        setViewportStart(newRow - maxVisible + 1);
+      }
     } else if (input === "m" && currentColumn.tasks[selectedRow]) {
       // Move to next status
       const task = currentColumn.tasks[selectedRow];
@@ -81,6 +97,8 @@ export function InteractiveKanban({
         data={data}
         selectedColumn={selectedColumn}
         selectedRow={selectedRow}
+        maxVisible={maxVisible}
+        viewportStart={viewportStart}
       />
       <Box marginTop={1}>
         <Text dimColor>
