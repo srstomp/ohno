@@ -127,6 +127,18 @@ export interface BatchTask extends Task {
 }
 
 /**
+ * Work queue entry for pre-computed task prioritization
+ */
+export interface WorkQueueEntry {
+  task_id: string;
+  priority_score: number;
+  batch_group: number;
+  blocked_by: string | null;
+  ready: number;
+  computed_at: string;
+}
+
+/**
  * Aggregated project statistics
  */
 export interface ProjectStatus {
