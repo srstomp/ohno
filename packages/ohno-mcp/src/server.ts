@@ -1,5 +1,10 @@
 /**
  * MCP Server for ohno task management
+ *
+ * Security model:
+ * - Uses stdio transport only — never expose over a network
+ * - No built-in authentication; the MCP client is responsible for access control
+ * - Database file (.ohno/tasks.db) should be restricted to the owning user (chmod 600)
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -1037,5 +1042,5 @@ export async function runServer(): Promise<void> {
   const server = await createServer();
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("ohno MCP server started");
+  console.error("ohno MCP server started (stdio transport — do not expose over network)");
 }
