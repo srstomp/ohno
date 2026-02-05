@@ -120,6 +120,21 @@ Always call `get_session_context()` to see in-progress tasks and handoff notes.
 - `update_task_progress(task_id, percent)`
 ```
 
+## Security
+
+The ohno MCP server uses **stdio transport** and has **no built-in authentication**. This is by design — MCP servers running over stdio delegate authentication and access control to the MCP client (e.g., Claude Desktop, Claude Code).
+
+### Key points
+
+- **Local only**: The server communicates exclusively over stdin/stdout. It should never be exposed over a network (HTTP, TCP, etc.).
+- **Client responsibility**: The MCP client that spawns this process is responsible for authorizing which users and tools have access.
+- **Database file permissions**: The `.ohno/tasks.db` SQLite file should be readable/writable only by the owning user (`chmod 600`). The default location inside your project directory inherits your project's file permissions.
+- **No secrets in task data**: Avoid storing credentials, API keys, or other secrets in task descriptions, handoff notes, or activity logs.
+
+### What this means in practice
+
+Any process that can connect to the server's stdio can read, create, modify, and delete all tasks. Since the server is designed to be spawned by an MCP client as a child process, this is expected — the client controls who can interact with it. If you are building a custom integration, ensure you do not expose the server's stdio to untrusted processes.
+
 ## Environment Variables
 
 - `OHNO_DB_PATH` - Path to tasks.db (default: walks up to find `.ohno/tasks.db`)
