@@ -74,15 +74,17 @@ async function handleListTasks(
 ): Promise<void> {
   const db = await getDb(globalOpts.dir as string | undefined);
 
-  const tasks = db.getTasks({
+  const filterOpts = {
     status: options.status as TaskStatus,
     priority: options.priority as "P0" | "P1" | "P2" | "P3" | undefined,
-    limit: parseInt(options.limit, 10),
-  });
+  };
+  const limit = parseInt(options.limit, 10);
+  const tasks = db.getTasks({ ...filterOpts, limit });
+  const totalCount = db.countTasks(filterOpts);
   db.close();
 
   if (globalOpts.json) {
-    out.json({ tasks });
+    out.json({ tasks, total_count: totalCount });
   } else {
     if (tasks.length === 0) {
       out.print(colors.dim("No tasks found"));
@@ -95,7 +97,11 @@ async function handleListTasks(
       out.print(`${colors.dim(task.id)}  ${status}  ${priority}${task.title}`);
     });
     out.print("");
-    out.print(colors.dim(`${tasks.length} tasks`));
+    if (totalCount > tasks.length) {
+      out.print(colors.dim(`${tasks.length} of ${totalCount} tasks (use -l to show more)`));
+    } else {
+      out.print(colors.dim(`${tasks.length} tasks`));
+    }
   }
 }
 

@@ -295,7 +295,7 @@ export class TaskDatabase {
     }
 
     sql += ` WHERE ${conditions.join(" AND ")}`;
-    sql += " ORDER BY t.updated_at DESC, t.created_at DESC";
+    sql += " ORDER BY CASE t.status WHEN 'in_progress' THEN 0 WHEN 'review' THEN 1 WHEN 'blocked' THEN 2 WHEN 'todo' THEN 3 WHEN 'done' THEN 4 ELSE 5 END, t.updated_at DESC, t.created_at DESC";
     sql += " LIMIT ?";
     params.push(limit);
 
@@ -310,6 +310,50 @@ export class TaskDatabase {
     stmt.free();
 
     return rows;
+  }
+
+  /**
+   * Count tasks matching the given filters (ignores limit)
+   */
+  countTasks(opts: GetTasksOptions = {}): number {
+    const { status, epic_id, priority, story_status, epic_status } = opts;
+
+    let sql = `SELECT COUNT(*) as count FROM tasks t
+    LEFT JOIN stories s ON t.story_id = s.id
+    LEFT JOIN epics e ON s.epic_id = e.id`;
+
+    const conditions: string[] = ["t.status != 'archived'"];
+    const params: unknown[] = [];
+
+    if (status) {
+      conditions.push("t.status = ?");
+      params.push(status);
+    }
+    if (epic_id) {
+      conditions.push("e.id = ?");
+      params.push(epic_id);
+    }
+    if (priority) {
+      conditions.push("e.priority = ?");
+      params.push(priority);
+    }
+    if (story_status) {
+      conditions.push("s.status = ?");
+      params.push(story_status);
+    }
+    if (epic_status) {
+      conditions.push("e.status = ?");
+      params.push(epic_status);
+    }
+
+    sql += ` WHERE ${conditions.join(" AND ")}`;
+
+    const stmt = this.db.prepare(sql);
+    stmt.bind(params as initSqlJs.BindParams);
+    stmt.step();
+    const count = (stmt.getAsObject() as { count: number }).count;
+    stmt.free();
+    return count;
   }
 
   /**
