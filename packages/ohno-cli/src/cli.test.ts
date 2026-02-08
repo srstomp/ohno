@@ -347,19 +347,130 @@ describe("CLI Commands", () => {
     });
   });
 
-  describe("task command", () => {
-    it("should get task details in JSON mode", async () => {
+  describe("task subcommands", () => {
+    it("should get task details via task get", async () => {
       const taskId = db.createTask({ title: "Test task" });
 
       const program = createCli();
       program.exitOverride();
 
-      await program.parseAsync(["node", "test", "--json", "-d", tempDir, "task", taskId]);
+      await program.parseAsync(["node", "test", "--json", "-d", tempDir, "task", "get", taskId]);
 
       const output = getConsoleOutput(consoleLogSpy);
       const parsed = JSON.parse(output);
       expect(parsed.id).toBe(taskId);
       expect(parsed.title).toBe("Test task");
+    });
+
+    it("should list tasks via task list", async () => {
+      db.createTask({ title: "Task A" });
+      db.createTask({ title: "Task B" });
+
+      const program = createCli();
+      program.exitOverride();
+
+      await program.parseAsync(["node", "test", "--json", "-d", tempDir, "task", "list"]);
+
+      const output = getConsoleOutput(consoleLogSpy);
+      const parsed = JSON.parse(output);
+      expect(parsed.tasks).toHaveLength(2);
+    });
+
+    it("should filter tasks via task list --status", async () => {
+      db.createTask({ title: "Todo task" });
+      const inProgressId = db.createTask({ title: "In progress task" });
+      db.updateTaskStatus(inProgressId, "in_progress");
+
+      const program = createCli();
+      program.exitOverride();
+
+      await program.parseAsync([
+        "node",
+        "test",
+        "--json",
+        "-d",
+        tempDir,
+        "task",
+        "list",
+        "-s",
+        "in_progress",
+      ]);
+
+      const output = getConsoleOutput(consoleLogSpy);
+      const parsed = JSON.parse(output);
+      expect(parsed.tasks).toHaveLength(1);
+      expect(parsed.tasks[0].title).toBe("In progress task");
+    });
+
+    it("should create task via task create", async () => {
+      const program = createCli();
+      program.exitOverride();
+
+      await program.parseAsync([
+        "node",
+        "test",
+        "--json",
+        "-d",
+        tempDir,
+        "task",
+        "create",
+        "New task via subcommand",
+      ]);
+
+      const output = getConsoleOutput(consoleLogSpy);
+      const parsed = JSON.parse(output);
+      expect(parsed.success).toBe(true);
+      expect(parsed.task_id).toMatch(/^task-[a-f0-9]{8}$/);
+    });
+
+    it("should start task via task start", async () => {
+      const taskId = db.createTask({ title: "Test" });
+
+      const program = createCli();
+      program.exitOverride();
+
+      await program.parseAsync(["node", "test", "--json", "-d", tempDir, "task", "start", taskId]);
+
+      const output = getConsoleOutput(consoleLogSpy);
+      const parsed = JSON.parse(output);
+      expect(parsed.success).toBe(true);
+
+      await db.reload();
+      const task = db.getTask(taskId);
+      expect(task?.status).toBe("in_progress");
+    });
+
+    it("should mark task done via task done", async () => {
+      const taskId = db.createTask({ title: "Test" });
+
+      const program = createCli();
+      program.exitOverride();
+
+      await program.parseAsync(["node", "test", "--json", "-d", tempDir, "task", "done", taskId]);
+
+      const output = getConsoleOutput(consoleLogSpy);
+      const parsed = JSON.parse(output);
+      expect(parsed.success).toBe(true);
+
+      await db.reload();
+      const task = db.getTask(taskId);
+      expect(task?.status).toBe("done");
+    });
+
+    it("should have subcommands consistent with epic/story pattern", () => {
+      const program = createCli();
+      const taskCmd = program.commands.find((c) => c.name() === "task");
+      expect(taskCmd).toBeDefined();
+
+      const subcommands = taskCmd!.commands.map((c) => c.name());
+      expect(subcommands).toContain("get");
+      expect(subcommands).toContain("list");
+      expect(subcommands).toContain("create");
+      expect(subcommands).toContain("start");
+      expect(subcommands).toContain("done");
+      expect(subcommands).toContain("review");
+      expect(subcommands).toContain("block");
+      expect(subcommands).toContain("unblock");
     });
   });
 
