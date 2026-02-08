@@ -47,6 +47,168 @@ function getOhnoDir(dir?: string): string {
   return ohnoDir;
 }
 
+// ==========================================================================
+// Task Handler Functions (shared between top-level and subcommand forms)
+// ==========================================================================
+
+async function handleGetTask(id: string, globalOpts: Record<string, unknown>): Promise<void> {
+  const db = await getDb(globalOpts.dir as string | undefined);
+  const task = db.getTask(id);
+  db.close();
+
+  if (!task) {
+    out.error("Task not found", id);
+    process.exit(1);
+  }
+
+  if (globalOpts.json) {
+    out.json(task);
+  } else {
+    out.print(formatTask(task as unknown as Record<string, unknown>));
+  }
+}
+
+async function handleListTasks(
+  options: { status?: string; priority?: string; limit: string },
+  globalOpts: Record<string, unknown>,
+): Promise<void> {
+  const db = await getDb(globalOpts.dir as string | undefined);
+
+  const tasks = db.getTasks({
+    status: options.status as TaskStatus,
+    priority: options.priority as "P0" | "P1" | "P2" | "P3" | undefined,
+    limit: parseInt(options.limit, 10),
+  });
+  db.close();
+
+  if (globalOpts.json) {
+    out.json({ tasks });
+  } else {
+    if (tasks.length === 0) {
+      out.print(colors.dim("No tasks found"));
+      return;
+    }
+
+    tasks.forEach((task) => {
+      const status = formatStatus(task.status);
+      const priority = task.epic_priority ? formatPriority(task.epic_priority) + " " : "";
+      out.print(`${colors.dim(task.id)}  ${status}  ${priority}${task.title}`);
+    });
+    out.print("");
+    out.print(colors.dim(`${tasks.length} tasks`));
+  }
+}
+
+async function handleCreateTask(
+  title: string,
+  options: { type: string; description?: string; estimate?: string; story?: string; source?: string },
+  globalOpts: Record<string, unknown>,
+): Promise<void> {
+  const db = await getDb(globalOpts.dir as string | undefined);
+
+  // Validate source
+  const validSources: TaskSource[] = ["human", "pokayokay-plan", "kaizen-fix", "kaizen-suggest"];
+  if (options.source && !validSources.includes(options.source as TaskSource)) {
+    out.error(
+      "Invalid source",
+      `Source must be one of: ${validSources.join(", ")}`,
+      `Got: ${options.source}`
+    );
+    process.exit(1);
+  }
+
+  const taskId = db.createTask({
+    title,
+    task_type: options.type as "feature" | "bug" | "chore" | "spike" | "test",
+    description: options.description,
+    estimate_hours: options.estimate ? parseFloat(options.estimate) : undefined,
+    story_id: options.story,
+    source: options.source as TaskSource | undefined,
+  });
+  db.close();
+
+  if (globalOpts.json) {
+    out.json({ success: true, task_id: taskId });
+  } else {
+    out.success(`Created task ${taskId}`);
+  }
+}
+
+async function handleStartTask(id: string, notes: string | undefined, globalOpts: Record<string, unknown>): Promise<void> {
+  const db = await getDb(globalOpts.dir as string | undefined);
+  const result = db.updateTaskStatus(id, "in_progress", notes);
+  db.close();
+
+  if (globalOpts.json) {
+    out.json(result);
+  } else if (result.success) {
+    out.success(`Started task ${id}`);
+  } else {
+    out.error("Failed to start task", id);
+    process.exit(1);
+  }
+}
+
+async function handleDoneTask(id: string, notes: string | undefined, globalOpts: Record<string, unknown>): Promise<void> {
+  const db = await getDb(globalOpts.dir as string | undefined);
+  const result = db.updateTaskStatus(id, "done", notes);
+  db.close();
+
+  if (globalOpts.json) {
+    out.json(result);
+  } else if (result.success) {
+    out.success(`Completed task ${id}`);
+  } else {
+    out.error("Failed to complete task", id);
+    process.exit(1);
+  }
+}
+
+async function handleReviewTask(id: string, notes: string | undefined, globalOpts: Record<string, unknown>): Promise<void> {
+  const db = await getDb(globalOpts.dir as string | undefined);
+  const result = db.updateTaskStatus(id, "review", notes);
+  db.close();
+
+  if (globalOpts.json) {
+    out.json(result);
+  } else if (result.success) {
+    out.success(`Task ${id} marked for review`);
+  } else {
+    out.error("Failed to update task", id);
+    process.exit(1);
+  }
+}
+
+async function handleBlockTask(id: string, reason: string, globalOpts: Record<string, unknown>): Promise<void> {
+  const db = await getDb(globalOpts.dir as string | undefined);
+  const success = db.setBlocker(id, reason);
+  db.close();
+
+  if (globalOpts.json) {
+    out.json({ success });
+  } else if (success) {
+    out.success(`Blocked task ${id}`);
+  } else {
+    out.error("Failed to block task", id);
+    process.exit(1);
+  }
+}
+
+async function handleUnblockTask(id: string, globalOpts: Record<string, unknown>): Promise<void> {
+  const db = await getDb(globalOpts.dir as string | undefined);
+  const success = db.resolveBlocker(id);
+  db.close();
+
+  if (globalOpts.json) {
+    out.json({ success });
+  } else if (success) {
+    out.success(`Unblocked task ${id}`);
+  } else {
+    out.error("Failed to unblock task", id);
+    process.exit(1);
+  }
+}
+
 export function createCli(): Command {
   const program = new Command()
     .name("ohno")
@@ -188,7 +350,7 @@ export function createCli(): Command {
     });
 
   // ==========================================================================
-  // Task Management Commands
+  // Task Management Commands (top-level shortcuts)
   // ==========================================================================
 
   program
@@ -199,52 +361,7 @@ export function createCli(): Command {
     .option("-l, --limit <limit>", "Max tasks to return", "50")
     .action(async (options, command) => {
       const globalOpts = command.parent?.opts() ?? {};
-      const db = await getDb(globalOpts.dir);
-
-      const tasks = db.getTasks({
-        status: options.status as TaskStatus,
-        priority: options.priority,
-        limit: parseInt(options.limit, 10),
-      });
-      db.close();
-
-      if (globalOpts.json) {
-        out.json({ tasks });
-      } else {
-        if (tasks.length === 0) {
-          out.print(colors.dim("No tasks found"));
-          return;
-        }
-
-        tasks.forEach((task) => {
-          const status = formatStatus(task.status);
-          const priority = task.epic_priority ? formatPriority(task.epic_priority) + " " : "";
-          out.print(`${colors.dim(task.id)}  ${status}  ${priority}${task.title}`);
-        });
-        out.print("");
-        out.print(colors.dim(`${tasks.length} tasks`));
-      }
-    });
-
-  program
-    .command("task <id>")
-    .description("Get task details")
-    .action(async (id, options, command) => {
-      const globalOpts = command.parent?.opts() ?? {};
-      const db = await getDb(globalOpts.dir);
-      const task = db.getTask(id);
-      db.close();
-
-      if (!task) {
-        out.error("Task not found", id);
-        process.exit(1);
-      }
-
-      if (globalOpts.json) {
-        out.json(task);
-      } else {
-        out.print(formatTask(task as unknown as Record<string, unknown>));
-      }
+      await handleListTasks(options, globalOpts);
     });
 
   program
@@ -257,34 +374,7 @@ export function createCli(): Command {
     .option("--source <source>", "Task source (human, pokayokay-plan, kaizen-fix, kaizen-suggest)", "human")
     .action(async (title, options, command) => {
       const globalOpts = command.parent?.opts() ?? {};
-      const db = await getDb(globalOpts.dir);
-
-      // Validate source
-      const validSources: TaskSource[] = ["human", "pokayokay-plan", "kaizen-fix", "kaizen-suggest"];
-      if (options.source && !validSources.includes(options.source as TaskSource)) {
-        out.error(
-          "Invalid source",
-          `Source must be one of: ${validSources.join(", ")}`,
-          `Got: ${options.source}`
-        );
-        process.exit(1);
-      }
-
-      const taskId = db.createTask({
-        title,
-        task_type: options.type,
-        description: options.description,
-        estimate_hours: options.estimate ? parseFloat(options.estimate) : undefined,
-        story_id: options.story,
-        source: options.source,
-      });
-      db.close();
-
-      if (globalOpts.json) {
-        out.json({ success: true, task_id: taskId });
-      } else {
-        out.success(`Created task ${taskId}`);
-      }
+      await handleCreateTask(title, options, globalOpts);
     });
 
   program
@@ -293,18 +383,7 @@ export function createCli(): Command {
     .option("-n, --notes <notes>", "Handoff notes")
     .action(async (id, options, command) => {
       const globalOpts = command.parent?.opts() ?? {};
-      const db = await getDb(globalOpts.dir);
-      const result = db.updateTaskStatus(id, "in_progress", options.notes);
-      db.close();
-
-      if (globalOpts.json) {
-        out.json(result);
-      } else if (result.success) {
-        out.success(`Started task ${id}`);
-      } else {
-        out.error("Failed to start task", id);
-        process.exit(1);
-      }
+      await handleStartTask(id, options.notes, globalOpts);
     });
 
   program
@@ -313,18 +392,7 @@ export function createCli(): Command {
     .option("-n, --notes <notes>", "Completion notes")
     .action(async (id, options, command) => {
       const globalOpts = command.parent?.opts() ?? {};
-      const db = await getDb(globalOpts.dir);
-      const result = db.updateTaskStatus(id, "done", options.notes);
-      db.close();
-
-      if (globalOpts.json) {
-        out.json(result);
-      } else if (result.success) {
-        out.success(`Completed task ${id}`);
-      } else {
-        out.error("Failed to complete task", id);
-        process.exit(1);
-      }
+      await handleDoneTask(id, options.notes, globalOpts);
     });
 
   program
@@ -333,18 +401,7 @@ export function createCli(): Command {
     .option("-n, --notes <notes>", "Review notes")
     .action(async (id, options, command) => {
       const globalOpts = command.parent?.opts() ?? {};
-      const db = await getDb(globalOpts.dir);
-      const result = db.updateTaskStatus(id, "review", options.notes);
-      db.close();
-
-      if (globalOpts.json) {
-        out.json(result);
-      } else if (result.success) {
-        out.success(`Task ${id} marked for review`);
-      } else {
-        out.error("Failed to update task", id);
-        process.exit(1);
-      }
+      await handleReviewTask(id, options.notes, globalOpts);
     });
 
   program
@@ -352,18 +409,7 @@ export function createCli(): Command {
     .description("Set a blocker on a task")
     .action(async (id, reason, options, command) => {
       const globalOpts = command.parent?.opts() ?? {};
-      const db = await getDb(globalOpts.dir);
-      const success = db.setBlocker(id, reason);
-      db.close();
-
-      if (globalOpts.json) {
-        out.json({ success });
-      } else if (success) {
-        out.success(`Blocked task ${id}`);
-      } else {
-        out.error("Failed to block task", id);
-        process.exit(1);
-      }
+      await handleBlockTask(id, reason, globalOpts);
     });
 
   program
@@ -371,18 +417,90 @@ export function createCli(): Command {
     .description("Resolve blocker on a task")
     .action(async (id, options, command) => {
       const globalOpts = command.parent?.opts() ?? {};
-      const db = await getDb(globalOpts.dir);
-      const success = db.resolveBlocker(id);
-      db.close();
+      await handleUnblockTask(id, globalOpts);
+    });
 
-      if (globalOpts.json) {
-        out.json({ success });
-      } else if (success) {
-        out.success(`Unblocked task ${id}`);
-      } else {
-        out.error("Failed to unblock task", id);
-        process.exit(1);
-      }
+  // ==========================================================================
+  // Task Subcommand Group (consistent with epic/story pattern)
+  // ==========================================================================
+
+  const task = program
+    .command("task")
+    .description("Manage tasks");
+
+  task
+    .command("get <id>")
+    .description("Get task details")
+    .action(async (id, options, command) => {
+      const globalOpts = command.parent?.parent?.opts() ?? {};
+      await handleGetTask(id, globalOpts);
+    });
+
+  task
+    .command("list")
+    .description("List tasks")
+    .option("-s, --status <status>", "Filter by status (todo, in_progress, review, done, blocked)")
+    .option("-p, --priority <priority>", "Filter by priority (P0, P1, P2, P3)")
+    .option("-l, --limit <limit>", "Max tasks to return", "50")
+    .action(async (options, command) => {
+      const globalOpts = command.parent?.parent?.opts() ?? {};
+      await handleListTasks(options, globalOpts);
+    });
+
+  task
+    .command("create <title>")
+    .description("Create a new task")
+    .option("-t, --type <type>", "Task type (feature, bug, chore, spike, test)", "feature")
+    .option("--description <desc>", "Task description")
+    .option("-e, --estimate <hours>", "Estimated hours")
+    .option("-s, --story <id>", "Story ID to link task to")
+    .option("--source <source>", "Task source (human, pokayokay-plan, kaizen-fix, kaizen-suggest)", "human")
+    .action(async (title, options, command) => {
+      const globalOpts = command.parent?.parent?.opts() ?? {};
+      await handleCreateTask(title, options, globalOpts);
+    });
+
+  task
+    .command("start <id>")
+    .description("Start working on a task")
+    .option("-n, --notes <notes>", "Handoff notes")
+    .action(async (id, options, command) => {
+      const globalOpts = command.parent?.parent?.opts() ?? {};
+      await handleStartTask(id, options.notes, globalOpts);
+    });
+
+  task
+    .command("done <id>")
+    .description("Mark task as done")
+    .option("-n, --notes <notes>", "Completion notes")
+    .action(async (id, options, command) => {
+      const globalOpts = command.parent?.parent?.opts() ?? {};
+      await handleDoneTask(id, options.notes, globalOpts);
+    });
+
+  task
+    .command("review <id>")
+    .description("Mark task for review")
+    .option("-n, --notes <notes>", "Review notes")
+    .action(async (id, options, command) => {
+      const globalOpts = command.parent?.parent?.opts() ?? {};
+      await handleReviewTask(id, options.notes, globalOpts);
+    });
+
+  task
+    .command("block <id> <reason>")
+    .description("Set a blocker on a task")
+    .action(async (id, reason, options, command) => {
+      const globalOpts = command.parent?.parent?.opts() ?? {};
+      await handleBlockTask(id, reason, globalOpts);
+    });
+
+  task
+    .command("unblock <id>")
+    .description("Resolve blocker on a task")
+    .action(async (id, options, command) => {
+      const globalOpts = command.parent?.parent?.opts() ?? {};
+      await handleUnblockTask(id, globalOpts);
     });
 
   // ==========================================================================
