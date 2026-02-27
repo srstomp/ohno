@@ -1249,6 +1249,43 @@ export class TaskDatabase {
   }
 
   /**
+   * Reopen a task (move from done/review/archived back to todo)
+   */
+  reopenTask(taskId: string, notes?: string, actor?: string): boolean {
+    // Guard: only reopen from done, review, or archived
+    const task = this.getTask(taskId);
+    if (!task) return false;
+
+    const reopenableStatuses = ["done", "review", "archived"];
+    if (!reopenableStatuses.includes(task.status)) {
+      return false;
+    }
+
+    const sql = `
+      UPDATE tasks
+      SET status = 'todo', activity_summary = NULL, needs_rework = 0, updated_at = ?
+      WHERE id = ?
+    `;
+
+    this.db.run(sql, [getTimestamp(), taskId]);
+    const changes = this.db.getRowsModified();
+
+    if (changes > 0) {
+      this.addTaskActivity(
+        taskId,
+        "reopen",
+        `Task reopened from ${task.status}${notes ? `: ${notes}` : ""}`,
+        actor
+      );
+      this.recomputeQueueEntry(taskId);
+      this.recomputeQueueDependents(taskId);
+      this.save();
+    }
+
+    return changes > 0;
+  }
+
+  /**
    * Delete a task (hard delete)
    */
   deleteTask(taskId: string): boolean {

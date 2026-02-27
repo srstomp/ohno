@@ -356,6 +356,99 @@ describe("TaskDatabase", () => {
         expect(tasks.find((t) => t.id === taskId)).toBeUndefined();
       });
     });
+
+    describe("reopenTask", () => {
+      it("should reopen a done task to todo", () => {
+        const taskId = db.createTask({ title: "Reopen me" });
+        db.updateTaskStatus(taskId, "done");
+
+        const result = db.reopenTask(taskId, "Found regression");
+
+        expect(result).toBe(true);
+        const task = db.getTask(taskId);
+        expect(task?.status).toBe("todo");
+      });
+
+      it("should reopen a review task to todo", () => {
+        const taskId = db.createTask({ title: "Reopen from review" });
+        db.updateTaskStatus(taskId, "review");
+
+        const result = db.reopenTask(taskId);
+
+        expect(result).toBe(true);
+        const task = db.getTask(taskId);
+        expect(task?.status).toBe("todo");
+      });
+
+      it("should reopen an archived task to todo", () => {
+        const taskId = db.createTask({ title: "Reopen from archived" });
+        db.archiveTask(taskId, "Old task");
+
+        const result = db.reopenTask(taskId);
+
+        expect(result).toBe(true);
+        const task = db.getTask(taskId);
+        expect(task?.status).toBe("todo");
+      });
+
+      it("should return false for todo task", () => {
+        const taskId = db.createTask({ title: "Already todo" });
+
+        const result = db.reopenTask(taskId);
+
+        expect(result).toBe(false);
+      });
+
+      it("should return false for in_progress task", () => {
+        const taskId = db.createTask({ title: "In progress" });
+        db.updateTaskStatus(taskId, "in_progress");
+
+        const result = db.reopenTask(taskId);
+
+        expect(result).toBe(false);
+      });
+
+      it("should return false for blocked task", () => {
+        const taskId = db.createTask({ title: "Blocked" });
+        db.setBlocker(taskId, "Waiting");
+
+        const result = db.reopenTask(taskId);
+
+        expect(result).toBe(false);
+      });
+
+      it("should log reopen activity", () => {
+        const taskId = db.createTask({ title: "Reopen with activity" });
+        db.updateTaskStatus(taskId, "done");
+
+        db.reopenTask(taskId, "Found bug");
+
+        const activities = db.getTaskActivity(taskId);
+        const reopenActivity = activities.find(
+          (a) => a.activity_type === "reopen"
+        );
+        expect(reopenActivity).toBeDefined();
+        expect(reopenActivity?.description).toContain("Found bug");
+      });
+
+      it("should clear activity_summary on reopen", () => {
+        const taskId = db.createTask({ title: "Summary task" });
+        // Add enough activities so summarize produces output
+        for (let i = 0; i < 6; i++) {
+          db.addTaskActivity(taskId, "note", `Note ${i}`);
+        }
+        db.updateTaskStatus(taskId, "done"); // triggers summarizeTaskActivity
+
+        // Verify summary was written before reopen
+        const taskBefore = db.getTask(taskId, "full");
+        expect(taskBefore?.activity_summary).not.toBeNull();
+
+        db.reopenTask(taskId);
+
+        const task = db.getTask(taskId, "full");
+        expect(task?.activity_summary).toBeNull();
+      });
+    });
   });
 
   describe("Progress Tracking", () => {
