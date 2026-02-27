@@ -15,7 +15,7 @@ export type Priority = "P0" | "P1" | "P2" | "P3";
 export type TaskSource = "human" | "pokayokay-plan" | "kaizen-fix" | "kaizen-suggest";
 
 // Activity type enum
-export type ActivityType = "status_change" | "note" | "file_change" | "decision" | "progress" | "created" | "updated" | "blocker_set" | "blocker_resolved" | "wip_update";
+export type ActivityType = "status_change" | "note" | "file_change" | "decision" | "progress" | "created" | "updated" | "blocker_set" | "blocker_resolved" | "wip_update" | "reopen";
 
 // Dependency type enum
 export type DependencyType = "blocks" | "requires" | "relates_to";
