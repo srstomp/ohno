@@ -718,6 +718,61 @@ describe("CLI Commands", () => {
     });
   });
 
+  describe("reopen command", () => {
+    it("should reopen a done task via top-level command", async () => {
+      const taskId = db.createTask({ title: "Test" });
+      db.updateTaskStatus(taskId, "done");
+
+      const program = createCli();
+      program.exitOverride();
+
+      await program.parseAsync(["node", "test", "--json", "-d", tempDir, "reopen", taskId]);
+
+      const output = getConsoleOutput(consoleLogSpy);
+      const parsed = JSON.parse(output);
+      expect(parsed.success).toBe(true);
+
+      await db.reload();
+      const task = db.getTask(taskId);
+      expect(task?.status).toBe("todo");
+    });
+
+    it("should reopen via task subcommand", async () => {
+      const taskId = db.createTask({ title: "Test" });
+      db.updateTaskStatus(taskId, "done");
+
+      const program = createCli();
+      program.exitOverride();
+
+      await program.parseAsync(["node", "test", "--json", "-d", tempDir, "task", "reopen", taskId]);
+
+      const output = getConsoleOutput(consoleLogSpy);
+      const parsed = JSON.parse(output);
+      expect(parsed.success).toBe(true);
+
+      await db.reload();
+      const task = db.getTask(taskId);
+      expect(task?.status).toBe("todo");
+    });
+
+    it("should pass notes to reopen", async () => {
+      const taskId = db.createTask({ title: "Test" });
+      db.updateTaskStatus(taskId, "done");
+
+      const program = createCli();
+      program.exitOverride();
+
+      await program.parseAsync([
+        "node", "test", "--json", "-d", tempDir,
+        "reopen", taskId, "-n", "Found regression",
+      ]);
+
+      const output = getConsoleOutput(consoleLogSpy);
+      const parsed = JSON.parse(output);
+      expect(parsed.success).toBe(true);
+    });
+  });
+
   describe("update-wip command", () => {
     it("should update task WIP with file modifications", async () => {
       const taskId = db.createTask({ title: "Test task" });
