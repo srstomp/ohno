@@ -91,6 +91,11 @@ const ArchiveSchema = z.object({
   reason: z.string().optional(),
 });
 
+const ReopenSchema = z.object({
+  task_id: z.string().min(1),
+  notes: z.string().optional(),
+});
+
 const NeedsReworkSchema = z.object({
   task_id: z.string().min(1),
   value: z.boolean(),
@@ -507,6 +512,18 @@ const TOOLS = [
     },
   },
   {
+    name: "reopen_task",
+    description: "Reopen a done/review/archived task (sets status back to todo)",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        task_id: { type: "string", description: "Task ID" },
+        notes: { type: "string", description: "Reason for reopening" },
+      },
+      required: ["task_id"],
+    },
+  },
+  {
     name: "add_dependency",
     description: "Add a dependency between tasks (task_id depends on depends_on_task_id)",
     inputSchema: {
@@ -653,6 +670,7 @@ export {
   ProgressSchema,
   BlockerSchema,
   ArchiveSchema,
+  ReopenSchema,
   DependencySchema,
   RemoveDependencySchema,
   SummarizeSchema,
@@ -886,6 +904,16 @@ export async function handleTool(name: string, args: Record<string, unknown>): P
       const parsed = ArchiveSchema.parse(args);
       const success = database.archiveTask(parsed.task_id, parsed.reason);
       return { success };
+    }
+
+    case "reopen_task": {
+      const parsed = ReopenSchema.parse(args);
+      const success = database.reopenTask(parsed.task_id, parsed.notes);
+      if (!success) {
+        const task = database.getTask(parsed.task_id);
+        return { success: false, error: task ? `Task is already active (status: ${task.status})` : "Task not found" };
+      }
+      return { success: true };
     }
 
     case "add_dependency": {
