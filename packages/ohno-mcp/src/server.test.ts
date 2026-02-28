@@ -24,6 +24,7 @@ import {
   ProgressSchema,
   BlockerSchema,
   ArchiveSchema,
+  ReopenSchema,
   DependencySchema,
   RemoveDependencySchema,
   SummarizeSchema,
@@ -59,8 +60,8 @@ describe("MCP Server", () => {
   });
 
   describe("Tool Definitions", () => {
-    it("should have 36 tools defined", () => {
-      expect(TOOLS.length).toBe(36);
+    it("should have 37 tools defined", () => {
+      expect(TOOLS.length).toBe(37);
     });
 
     it("should have unique tool names", () => {
@@ -97,6 +98,7 @@ describe("MCP Server", () => {
         "create_story",
         "update_task",
         "archive_task",
+        "reopen_task",
         "add_dependency",
         "remove_dependency",
         "get_task_dependencies",
@@ -1852,6 +1854,43 @@ describe("MCP Server", () => {
 
         expect(result.success).toBe(true);
         expect(db.getTask(taskId)?.status).toBe("archived");
+      });
+    });
+
+    describe("reopen_task", () => {
+      it("should reopen a done task", async () => {
+        const taskId = db.createTask({ title: "Test" });
+        db.updateTaskStatus(taskId, "done");
+
+        const result = await handleTool("reopen_task", { task_id: taskId }) as {
+          success: boolean;
+        };
+
+        expect(result.success).toBe(true);
+        expect(db.getTask(taskId)?.status).toBe("todo");
+      });
+
+      it("should reopen with notes", async () => {
+        const taskId = db.createTask({ title: "Test" });
+        db.updateTaskStatus(taskId, "done");
+
+        const result = await handleTool("reopen_task", {
+          task_id: taskId,
+          notes: "Found regression",
+        }) as { success: boolean };
+
+        expect(result.success).toBe(true);
+      });
+
+      it("should fail for active task", async () => {
+        const taskId = db.createTask({ title: "Test" });
+
+        const result = await handleTool("reopen_task", { task_id: taskId }) as {
+          success: boolean;
+          error: string;
+        };
+
+        expect(result.success).toBe(false);
       });
     });
 
