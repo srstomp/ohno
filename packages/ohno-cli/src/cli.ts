@@ -185,6 +185,25 @@ async function handleReviewTask(id: string, notes: string | undefined, globalOpt
   }
 }
 
+async function handleReopenTask(id: string, notes: string | undefined, globalOpts: Record<string, unknown>): Promise<void> {
+  const db = await getDb(globalOpts.dir as string | undefined);
+  const task = db.getTask(id);
+  const success = db.reopenTask(id, notes);
+  db.close();
+
+  if (globalOpts.json) {
+    out.json({ success });
+  } else if (success) {
+    out.success(`Reopened task ${id}`);
+  } else if (task && ["todo", "in_progress", "blocked"].includes(task.status)) {
+    out.error(`Task ${id} is already active (status: ${task.status})`);
+    process.exit(1);
+  } else {
+    out.error("Failed to reopen task", id);
+    process.exit(1);
+  }
+}
+
 async function handleBlockTask(id: string, reason: string, globalOpts: Record<string, unknown>): Promise<void> {
   const db = await getDb(globalOpts.dir as string | undefined);
   const success = db.setBlocker(id, reason);
@@ -426,6 +445,15 @@ export function createCli(): Command {
       await handleUnblockTask(id, globalOpts);
     });
 
+  program
+    .command("reopen <id>")
+    .description("Reopen a done/review/archived task (set status to todo)")
+    .option("-n, --notes <notes>", "Reason for reopening")
+    .action(async (id, options, command) => {
+      const globalOpts = command.parent?.opts() ?? {};
+      await handleReopenTask(id, options.notes, globalOpts);
+    });
+
   // ==========================================================================
   // Task Subcommand Group (consistent with epic/story pattern)
   // ==========================================================================
@@ -507,6 +535,15 @@ export function createCli(): Command {
     .action(async (id, options, command) => {
       const globalOpts = command.parent?.parent?.opts() ?? {};
       await handleUnblockTask(id, globalOpts);
+    });
+
+  task
+    .command("reopen <id>")
+    .description("Reopen a done/review/archived task")
+    .option("-n, --notes <notes>", "Reason for reopening")
+    .action(async (id, options, command) => {
+      const globalOpts = command.parent?.parent?.opts() ?? {};
+      await handleReopenTask(id, options.notes, globalOpts);
     });
 
   // ==========================================================================
