@@ -211,10 +211,10 @@ export interface Story {
   id: string;
   epic_id: string | null;
   title: string;
-  description: string | null;
+  description?: string | null;
   status: StoryStatus;
-  created_at: string;
-  updated_at: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 /**
@@ -249,6 +249,8 @@ export interface GetEpicsOptions {
   status?: TaskStatus;
   priority?: Priority;
   limit?: number;
+  fields?: FieldSet;
+  search?: string;
 }
 
 /**
@@ -259,6 +261,8 @@ export interface GetStoriesOptions {
   status?: StoryStatus;
   limit?: number;
   offset?: number;
+  fields?: FieldSet;
+  search?: string;
 }
 
 /**
@@ -271,7 +275,9 @@ export interface GetTasksOptions {
   story_status?: TaskStatus;
   epic_status?: TaskStatus;
   limit?: number;
+  offset?: number;
   fields?: FieldSet;
+  search?: string;
 }
 
 /**

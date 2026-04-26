@@ -117,7 +117,7 @@ describe("MCP Server", () => {
     describe("GetTasksSchema", () => {
       it("should accept empty object", () => {
         const result = GetTasksSchema.parse({});
-        expect(result.limit).toBe(50); // default
+        expect(result.limit).toBe(10); // default
       });
 
       it("should accept valid status", () => {
@@ -141,6 +141,21 @@ describe("MCP Server", () => {
       it("should accept valid limit", () => {
         const result = GetTasksSchema.parse({ limit: 10 });
         expect(result.limit).toBe(10);
+      });
+
+      it("should default to a compact limit", () => {
+        const result = GetTasksSchema.parse({});
+        expect(result.limit).toBe(10);
+      });
+
+      it("should accept offset and search", () => {
+        const result = GetTasksSchema.parse({ offset: 20, search: "migration" });
+        expect(result.offset).toBe(20);
+        expect(result.search).toBe("migration");
+      });
+
+      it("should reject negative offset", () => {
+        expect(() => GetTasksSchema.parse({ offset: -1 })).toThrow(ZodError);
       });
 
       it("should reject limit below minimum", () => {
@@ -352,8 +367,9 @@ describe("MCP Server", () => {
     describe("GetStoriesSchema", () => {
       it("should accept empty object with defaults", () => {
         const result = GetStoriesSchema.parse({});
-        expect(result.limit).toBe(50);
+        expect(result.limit).toBe(10);
         expect(result.offset).toBe(0);
+        expect(result.fields).toBe("minimal");
       });
 
       it("should accept epic_id filter", () => {
@@ -398,6 +414,21 @@ describe("MCP Server", () => {
         expect(result.offset).toBe(10);
       });
 
+      it("should accept fields parameter with valid values", () => {
+        expect(() => GetStoriesSchema.parse({ fields: "minimal" })).not.toThrow();
+        expect(() => GetStoriesSchema.parse({ fields: "standard" })).not.toThrow();
+        expect(() => GetStoriesSchema.parse({ fields: "full" })).not.toThrow();
+      });
+
+      it("should reject invalid fields values", () => {
+        expect(() => GetStoriesSchema.parse({ fields: "invalid" })).toThrow(ZodError);
+      });
+
+      it("should accept search", () => {
+        const result = GetStoriesSchema.parse({ search: "migration" });
+        expect(result.search).toBe("migration");
+      });
+
       it("should reject negative offset", () => {
         expect(() => GetStoriesSchema.parse({ offset: -1 })).toThrow(ZodError);
       });
@@ -408,11 +439,15 @@ describe("MCP Server", () => {
           status: "todo",
           limit: 20,
           offset: 5,
+          fields: "standard",
+          search: "migration",
         });
         expect(result.epic_id).toBe("epic-1");
         expect(result.status).toBe("todo");
         expect(result.limit).toBe(20);
         expect(result.offset).toBe(5);
+        expect(result.fields).toBe("standard");
+        expect(result.search).toBe("migration");
       });
     });
 
@@ -658,7 +693,8 @@ describe("MCP Server", () => {
     describe("GetEpicsSchema", () => {
       it("should accept empty object with defaults", () => {
         const result = GetEpicsSchema.parse({});
-        expect(result.limit).toBe(50);
+        expect(result.limit).toBe(10);
+        expect(result.fields).toBe("minimal");
       });
 
       it("should accept status filter", () => {
@@ -674,6 +710,21 @@ describe("MCP Server", () => {
       it("should accept limit", () => {
         const result = GetEpicsSchema.parse({ limit: 25 });
         expect(result.limit).toBe(25);
+      });
+
+      it("should accept fields parameter with valid values", () => {
+        expect(() => GetEpicsSchema.parse({ fields: "minimal" })).not.toThrow();
+        expect(() => GetEpicsSchema.parse({ fields: "standard" })).not.toThrow();
+        expect(() => GetEpicsSchema.parse({ fields: "full" })).not.toThrow();
+      });
+
+      it("should reject invalid fields values", () => {
+        expect(() => GetEpicsSchema.parse({ fields: "invalid" })).toThrow(ZodError);
+      });
+
+      it("should accept search", () => {
+        const result = GetEpicsSchema.parse({ search: "migration" });
+        expect(result.search).toBe("migration");
       });
 
       it("should validate limit bounds", () => {
@@ -1032,6 +1083,37 @@ describe("MCP Server", () => {
         expect(result.tasks[0].title).toBe("In progress");
       });
 
+      it("should search by title", async () => {
+        db.createTask({ title: "SQLite migration" });
+        db.createTask({ title: "Unrelated cleanup" });
+
+        const result = await handleTool("get_tasks", { search: "migration" }) as {
+          tasks: Array<{ title: string }>;
+        };
+
+        expect(result.tasks.map((task) => task.title)).toEqual(["SQLite migration"]);
+      });
+
+      it("should respect offset parameter", async () => {
+        for (let i = 0; i < 12; i++) {
+          db.createTask({ title: `Task ${i}` });
+        }
+
+        const result = await handleTool("get_tasks", { limit: 10, offset: 10 }) as { tasks: unknown[] };
+
+        expect(result.tasks.length).toBe(2);
+      });
+
+      it("should default to a compact limit", async () => {
+        for (let i = 0; i < 12; i++) {
+          db.createTask({ title: `Task ${i}` });
+        }
+
+        const result = await handleTool("get_tasks", {}) as { tasks: unknown[] };
+
+        expect(result.tasks.length).toBe(10);
+      });
+
       describe("field selection", () => {
         it("should return minimal fields by default", async () => {
           db.createTask({ title: "Test", description: "Long description here" });
@@ -1379,6 +1461,16 @@ describe("MCP Server", () => {
         expect(result.stories.length).toBe(5);
       });
 
+      it("should default to a compact limit", async () => {
+        for (let i = 0; i < 12; i++) {
+          db.createStory({ title: `Story ${i}` });
+        }
+
+        const result = await handleTool("list_stories", {}) as { stories: unknown[] };
+
+        expect(result.stories.length).toBe(10);
+      });
+
       it("should respect offset parameter", async () => {
         for (let i = 0; i < 10; i++) {
           db.createStory({ title: `Story ${i}` });
@@ -1386,6 +1478,38 @@ describe("MCP Server", () => {
 
         const result = await handleTool("list_stories", { offset: 8 }) as { stories: unknown[] };
         expect(result.stories.length).toBe(2);
+      });
+
+      it("should search by title", async () => {
+        db.createStory({ title: "Migration story", description: "Large description" });
+        db.createStory({ title: "Cleanup story", description: "Other description" });
+
+        const result = await handleTool("list_stories", { search: "migration" }) as {
+          stories: Array<{ title: string }>;
+        };
+
+        expect(result.stories.map((story) => story.title)).toEqual(["Migration story"]);
+      });
+
+      it("should return minimal fields by default", async () => {
+        db.createStory({ title: "Lean story", description: "Large description" });
+
+        const result = await handleTool("list_stories", {}) as {
+          stories: Array<Record<string, unknown>>;
+        };
+
+        expect(result.stories[0].title).toBe("Lean story");
+        expect(result.stories[0].description).toBeUndefined();
+      });
+
+      it("should return description when standard fields are requested", async () => {
+        db.createStory({ title: "Detailed story", description: "Useful detail" });
+
+        const result = await handleTool("list_stories", { fields: "standard" }) as {
+          stories: Array<Record<string, unknown>>;
+        };
+
+        expect(result.stories[0].description).toBe("Useful detail");
       });
 
       it("should combine filters", async () => {
@@ -1406,6 +1530,7 @@ describe("MCP Server", () => {
           epic_id: "epic-1",
           status: "in_progress",
           limit: 10,
+          search: "Story",
         }) as { stories: Array<{ status: string }> };
 
         expect(result.stories.length).toBe(2);
@@ -1616,6 +1741,48 @@ describe("MCP Server", () => {
 
         const result = await handleTool("get_epics", { limit: 5 }) as { epics: unknown[] };
         expect(result.epics.length).toBe(5);
+      });
+
+      it("should default to a compact limit", async () => {
+        for (let i = 0; i < 12; i++) {
+          db.createEpic({ title: `Epic ${i}` });
+        }
+
+        const result = await handleTool("get_epics", {}) as { epics: unknown[] };
+
+        expect(result.epics.length).toBe(10);
+      });
+
+      it("should search by title", async () => {
+        db.createEpic({ title: "Migration epic", description: "Large description" });
+        db.createEpic({ title: "Cleanup epic", description: "Other description" });
+
+        const result = await handleTool("get_epics", { search: "migration" }) as {
+          epics: Array<{ title: string }>;
+        };
+
+        expect(result.epics.map((epic) => epic.title)).toEqual(["Migration epic"]);
+      });
+
+      it("should return minimal fields by default", async () => {
+        db.createEpic({ title: "Lean epic", description: "Large description" });
+
+        const result = await handleTool("get_epics", {}) as {
+          epics: Array<Record<string, unknown>>;
+        };
+
+        expect(result.epics[0].title).toBe("Lean epic");
+        expect(result.epics[0].description).toBeUndefined();
+      });
+
+      it("should return description when standard fields are requested", async () => {
+        db.createEpic({ title: "Detailed epic", description: "Useful detail" });
+
+        const result = await handleTool("get_epics", { fields: "standard" }) as {
+          epics: Array<Record<string, unknown>>;
+        };
+
+        expect(result.epics[0].description).toBe("Useful detail");
       });
     });
 
