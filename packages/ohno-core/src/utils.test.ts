@@ -233,6 +233,23 @@ describe("Directory Discovery", () => {
   });
 });
 
+describe('findOhnoDir — git-aware behavior', () => {
+  let tmpDir: string;
+  beforeEach(() => { tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ohno-fod-')); });
+  afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
+
+  it('returns canonical .ohno from a normal git repo', () => {
+    execFileSync('git', ['init'], { cwd: tmpDir, stdio: 'ignore' });
+    fs.mkdirSync(path.join(tmpDir, '.ohno'));
+    expect(findOhnoDir(tmpDir)).toBe(path.join(fs.realpathSync(tmpDir), '.ohno'));
+  });
+
+  it('falls back to cwd-walk when not in a git repo', () => {
+    fs.mkdirSync(path.join(tmpDir, '.ohno'));
+    expect(findOhnoDir(tmpDir)).toBe(path.join(tmpDir, '.ohno'));
+  });
+});
+
 describe("sortByPriority", () => {
   it("should sort P0 before P1", () => {
     const tasks: Task[] = [
