@@ -25,6 +25,21 @@ import {
 } from "./utils.js";
 import type { Task } from "./types.js";
 
+function hasGit(): boolean {
+  try { execFileSync('git', ['--version'], { stdio: 'ignore' }); return true; } catch { return false; }
+}
+const itGit = hasGit() ? it : it.skip;
+
+function gitInit(dir: string) {
+  execFileSync('git', ['init'], { cwd: dir, stdio: 'ignore' });
+  execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: dir, stdio: 'ignore' });
+  execFileSync('git', ['config', 'user.name', 'Test'], { cwd: dir, stdio: 'ignore' });
+}
+function gitCommit(dir: string, msg = 'init') {
+  execFileSync('git', ['add', '-A'], { cwd: dir, stdio: 'ignore' });
+  execFileSync('git', ['commit', '-m', msg, '--allow-empty'], { cwd: dir, stdio: 'ignore' });
+}
+
 describe('tryGit', () => {
   let tmpDir: string;
   beforeEach(() => { tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ohno-trygit-')); });
@@ -247,6 +262,98 @@ describe('findOhnoDir — git-aware behavior', () => {
   it('falls back to cwd-walk when not in a git repo', () => {
     fs.mkdirSync(path.join(tmpDir, '.ohno'));
     expect(findOhnoDir(tmpDir)).toBe(path.join(tmpDir, '.ohno'));
+  });
+});
+
+describe('findOhnoDir — eight integration scenarios', () => {
+  let tmpDir: string;
+  beforeEach(() => { tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ohno-int-')); });
+  afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
+
+  itGit('1. canonical root', () => {
+    gitInit(tmpDir);
+    const ohno = path.join(tmpDir, '.ohno');
+    fs.mkdirSync(ohno);
+    expect(findOhnoDir(tmpDir)).toBe(path.join(fs.realpathSync(tmpDir), '.ohno'));
+  });
+
+  itGit('2. linked worktree returns canonical, not stale worktree-local', () => {
+    gitInit(tmpDir);
+    fs.mkdirSync(path.join(tmpDir, '.ohno'));
+    fs.writeFileSync(path.join(tmpDir, 'README.md'), 'test');
+    gitCommit(tmpDir);
+    const wt = path.join(tmpDir, '.worktrees', 'feat');
+    execFileSync('git', ['worktree', 'add', '-b', 'feat', wt], { cwd: tmpDir, stdio: 'ignore' });
+    fs.mkdirSync(path.join(wt, '.ohno'));  // simulate buggy stale state
+    const sub = path.join(wt, 'a', 'b');
+    fs.mkdirSync(sub, { recursive: true });
+    expect(findOhnoDir(sub)).toBe(path.join(fs.realpathSync(tmpDir), '.ohno'));
+  });
+
+  itGit('3. worktree without canonical .ohno returns null', () => {
+    gitInit(tmpDir);
+    fs.writeFileSync(path.join(tmpDir, 'README.md'), 'test');
+    gitCommit(tmpDir);
+    const wt = path.join(tmpDir, '.worktrees', 'feat');
+    execFileSync('git', ['worktree', 'add', '-b', 'feat', wt], { cwd: tmpDir, stdio: 'ignore' });
+    fs.mkdirSync(path.join(wt, '.ohno'));
+    expect(findOhnoDir(wt)).toBeNull();
+  });
+
+  itGit('4. submodule resolves to its own .ohno', () => {
+    const subSrc = path.join(tmpDir, 'sub-src');
+    fs.mkdirSync(subSrc);
+    gitInit(subSrc);
+    fs.writeFileSync(path.join(subSrc, 'a.txt'), 'a');
+    gitCommit(subSrc);
+
+    const parent = path.join(tmpDir, 'parent');
+    fs.mkdirSync(parent);
+    gitInit(parent);
+    fs.writeFileSync(path.join(parent, 'README.md'), 'p');
+    gitCommit(parent);
+
+    execFileSync('git', ['-c', 'protocol.file.allow=always', 'submodule', 'add', 'file://' + subSrc, 'sub'], { cwd: parent, stdio: 'ignore' });
+
+    fs.mkdirSync(path.join(parent, '.ohno'));
+    fs.mkdirSync(path.join(parent, 'sub', '.ohno'));
+
+    const subPath = path.join(parent, 'sub', 'deep');
+    fs.mkdirSync(subPath);
+    expect(findOhnoDir(subPath)).toBe(path.join(fs.realpathSync(parent), 'sub', '.ohno'));
+  });
+
+  itGit('5. bare repo returns null', () => {
+    const bare = path.join(tmpDir, 'bare.git');
+    fs.mkdirSync(bare);
+    execFileSync('git', ['init', '--bare'], { cwd: bare, stdio: 'ignore' });
+    expect(findOhnoDir(bare)).toBeNull();
+  });
+
+  itGit('6. external gitdir resolves to working tree', () => {
+    const wt = path.join(tmpDir, 'wt');
+    const gd = path.join(tmpDir, 'gd');
+    fs.mkdirSync(wt);
+    execFileSync('git', ['init', '--separate-git-dir=' + gd], { cwd: wt, stdio: 'ignore' });
+    fs.mkdirSync(path.join(wt, '.ohno'));
+    expect(findOhnoDir(wt)).toBe(path.join(fs.realpathSync(wt), '.ohno'));
+  });
+
+  it('7. non-git dir with .ohno: cwd-walk fallback returns it', () => {
+    fs.mkdirSync(path.join(tmpDir, '.ohno'));
+    expect(findOhnoDir(tmpDir)).toBe(path.join(tmpDir, '.ohno'));
+  });
+
+  it('8. git not on PATH falls back to cwd-walk without throwing', () => {
+    fs.mkdirSync(path.join(tmpDir, '.ohno'));
+    const origPath = process.env.PATH;
+    try {
+      process.env.PATH = '';
+      expect(() => findOhnoDir(tmpDir)).not.toThrow();
+      expect(findOhnoDir(tmpDir)).toBe(path.join(tmpDir, '.ohno'));
+    } finally {
+      process.env.PATH = origPath;
+    }
   });
 });
 
