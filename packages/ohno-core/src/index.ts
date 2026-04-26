@@ -2,7 +2,7 @@
  * ohno-core - Core database layer for ohno task management
  */
 
-export { TaskDatabase } from "./db.js";
+export { TaskDatabase, OhnoDatabaseLockedError } from "./db.js";
 
 export type {
   Task,

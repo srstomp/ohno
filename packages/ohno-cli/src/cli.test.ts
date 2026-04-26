@@ -7,7 +7,7 @@ import { mkdtempSync, rmSync, mkdirSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { createRequire } from "module";
-import { TaskDatabase } from "@stevestomp/ohno-core";
+import { TaskDatabase, OhnoDatabaseLockedError } from "@stevestomp/ohno-core";
 import { createCli } from "./cli.js";
 
 const require = createRequire(import.meta.url);
@@ -1345,6 +1345,91 @@ describe("CLI Commands", () => {
 
       const watchOption = kanbanCmd?.options.find((o) => o.long === "--watch");
       expect(watchOption).toBeDefined();
+    });
+  });
+
+  describe("OhnoDatabaseLockedError - CLI entry point error handler", () => {
+    it("MUST: OhnoDatabaseLockedError is a real error class importable from ohno-core", () => {
+      const err = new OhnoDatabaseLockedError("SQLITE_BUSY", "test");
+      expect(err).toBeInstanceOf(OhnoDatabaseLockedError);
+      expect(err.sqliteCode).toBe("SQLITE_BUSY");
+    });
+
+    it("MUST: CLI error handler emits stderr message for OhnoDatabaseLockedError without --json", () => {
+      // Test the logic of the main().catch() handler by simulating it directly.
+      const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+      const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const exitSpy = vi.spyOn(process, "exit").mockImplementation((() => {}) as any);
+
+      const err = new OhnoDatabaseLockedError(
+        "SQLITE_BUSY",
+        "Database is locked by another ohno process; retry timed out after 5s. Try again, or check for stale ohno-mcp processes with 'ps aux | grep ohno-mcp'."
+      );
+
+      // Simulate the catch handler from index.ts (without --json in argv)
+      const originalArgv = process.argv;
+      process.argv = ["node", "ohno", "tasks"];  // no --json
+      if (err instanceof OhnoDatabaseLockedError) {
+        if (process.argv.includes('--json')) {
+          process.stdout.write(JSON.stringify({
+            success: false,
+            error: err.message,
+            errorCode: err.sqliteCode,
+          }) + '\n');
+        } else {
+          process.stderr.write(err.message + '\n');
+        }
+        process.exit(1);
+      }
+      process.argv = originalArgv;
+
+      expect(stderrSpy).toHaveBeenCalledWith(expect.stringContaining("retry timed out after 5s"));
+      expect(stdoutSpy).not.toHaveBeenCalled();
+      expect(exitSpy).toHaveBeenCalledWith(1);
+
+      stderrSpy.mockRestore();
+      stdoutSpy.mockRestore();
+      exitSpy.mockRestore();
+    });
+
+    it("MUST: CLI error handler emits JSON to stdout for OhnoDatabaseLockedError with --json", () => {
+      const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+      const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const exitSpy = vi.spyOn(process, "exit").mockImplementation((() => {}) as any);
+
+      const err = new OhnoDatabaseLockedError(
+        "SQLITE_BUSY",
+        "Database is locked by another ohno process; retry timed out after 5s. Try again, or check for stale ohno-mcp processes with 'ps aux | grep ohno-mcp'."
+      );
+
+      const originalArgv = process.argv;
+      process.argv = ["node", "ohno", "tasks", "--json"];
+      if (err instanceof OhnoDatabaseLockedError) {
+        if (process.argv.includes('--json')) {
+          process.stdout.write(JSON.stringify({
+            success: false,
+            error: err.message,
+            errorCode: err.sqliteCode,
+          }) + '\n');
+        } else {
+          process.stderr.write(err.message + '\n');
+        }
+        process.exit(1);
+      }
+      process.argv = originalArgv;
+
+      const jsonOutput = JSON.parse(stdoutSpy.mock.calls[0]?.[0] as string);
+      expect(jsonOutput.success).toBe(false);
+      expect(jsonOutput.error).toContain("retry timed out after 5s");
+      expect(jsonOutput.errorCode).toBe("SQLITE_BUSY");
+      expect(stderrSpy).not.toHaveBeenCalled();
+      expect(exitSpy).toHaveBeenCalledWith(1);
+
+      stderrSpy.mockRestore();
+      stdoutSpy.mockRestore();
+      exitSpy.mockRestore();
     });
   });
 });

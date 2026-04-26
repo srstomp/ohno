@@ -6,7 +6,8 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { TaskDatabase } from "./db.js";
+import { DatabaseSync } from "node:sqlite";
+import { TaskDatabase, OhnoDatabaseLockedError } from "./db.js";
 import type { TaskStatus } from "./types.js";
 
 describe("TaskDatabase", () => {
@@ -40,6 +41,15 @@ describe("TaskDatabase", () => {
       const db2 = await TaskDatabase.open(dbPath);
       expect(db2).toBeDefined();
       db2.close();
+    });
+
+    it("should not swallow schema migration errors other than duplicate columns", async () => {
+      const malformedDbPath = join(tempDir, "malformed-schema.db");
+      const malformedDb = new DatabaseSync(malformedDbPath);
+      malformedDb.exec("CREATE VIEW tasks AS SELECT 'task-1' AS id");
+      malformedDb.close();
+
+      await expect(TaskDatabase.open(malformedDbPath)).rejects.toThrow("Cannot add a column to a view");
     });
   });
 
@@ -755,25 +765,22 @@ describe("TaskDatabase", () => {
     // Helper function to set up hierarchy: epic -> story -> tasks
     const setupHierarchy = () => {
       // Access the private db property for direct SQL
-      const dbInstance = db as unknown as { db: { run: (sql: string, params?: unknown[]) => void } };
+      const dbInstance = db as unknown as { db: DatabaseSync };
 
       // Create an epic
-      dbInstance.db.run(
-        "INSERT INTO epics (id, title, priority) VALUES (?, ?, ?)",
-        ["epic-1", "Epic 1", "P0"]
-      );
+      dbInstance.db.prepare(
+        "INSERT INTO epics (id, title, priority) VALUES (?, ?, ?)"
+      ).run("epic-1", "Epic 1", "P0");
 
       // Create a story
-      dbInstance.db.run(
-        "INSERT INTO stories (id, epic_id, title) VALUES (?, ?, ?)",
-        ["story-1", "epic-1", "Story 1"]
-      );
+      dbInstance.db.prepare(
+        "INSERT INTO stories (id, epic_id, title) VALUES (?, ?, ?)"
+      ).run("story-1", "epic-1", "Story 1");
 
       // Create another story in the same epic
-      dbInstance.db.run(
-        "INSERT INTO stories (id, epic_id, title) VALUES (?, ?, ?)",
-        ["story-2", "epic-1", "Story 2"]
-      );
+      dbInstance.db.prepare(
+        "INSERT INTO stories (id, epic_id, title) VALUES (?, ?, ?)"
+      ).run("story-2", "epic-1", "Story 2");
     };
 
     describe("isStoryCompleted", () => {
@@ -1544,11 +1551,10 @@ describe("TaskDatabase", () => {
         const taskId = db.createTask({ title: "Invalid WIP" });
 
         // Manually insert invalid JSON (edge case)
-        const dbInstance = db as unknown as { db: { run: (sql: string, params?: unknown[]) => void } };
-        dbInstance.db.run(
-          "UPDATE tasks SET work_in_progress = ? WHERE id = ?",
-          ["invalid json{", taskId]
-        );
+        const dbInstance = db as unknown as { db: DatabaseSync };
+        dbInstance.db.prepare(
+          "UPDATE tasks SET work_in_progress = ? WHERE id = ?"
+        ).run("invalid json{", taskId);
 
         // Should treat as empty object and continue
         const result = db.updateTaskWip(taskId, { phase: "recovery" });
@@ -1806,6 +1812,57 @@ describe("TaskDatabase", () => {
   });
 
   describe("Memory Decay", () => {
+    describe("hierarchy deletion", () => {
+      it("should delete archived tasks when deleting a story", () => {
+        const storyId = db.createStory({ title: "Story with archived task" });
+        const taskId = db.createTask({ title: "Archived task", story_id: storyId });
+        db.archiveTask(taskId);
+
+        expect(db.deleteStory(storyId)).toBe(true);
+        expect(db.getTask(taskId)).toBeNull();
+        expect(db.getStory(storyId)).toBeNull();
+      });
+
+      it("should delete every task in a story without a 1000 task limit", () => {
+        const storyId = db.createStory({ title: "Large story" });
+        const taskIds: string[] = [];
+
+        for (let i = 0; i < 1005; i++) {
+          taskIds.push(db.createTask({ title: `Task ${i}`, story_id: storyId }));
+        }
+
+        expect(db.deleteStory(storyId)).toBe(true);
+        expect(taskIds.every((taskId) => db.getTask(taskId) === null)).toBe(true);
+      });
+
+      it("should delete archived story tasks when deleting an epic", () => {
+        const epicId = db.createEpic({ title: "Epic with archived task" });
+        const storyId = db.createStory({ title: "Child story", epic_id: epicId });
+        const taskId = db.createTask({ title: "Archived task", story_id: storyId });
+        db.archiveTask(taskId);
+
+        expect(db.deleteEpic(epicId)).toBe(true);
+        expect(db.getTask(taskId)).toBeNull();
+        expect(db.getStory(storyId)).toBeNull();
+        expect(db.getEpic(epicId)).toBeNull();
+      });
+
+      it("should delete every story in an epic without a 50 story limit", () => {
+        const epicId = db.createEpic({ title: "Large epic" });
+        const storyIds: string[] = [];
+
+        for (let i = 0; i < 55; i++) {
+          const storyId = db.createStory({ title: `Story ${i}`, epic_id: epicId });
+          storyIds.push(storyId);
+          db.createTask({ title: `Task ${i}`, story_id: storyId });
+        }
+
+        expect(db.deleteEpic(epicId)).toBe(true);
+        expect(storyIds.every((storyId) => db.getStory(storyId) === null)).toBe(true);
+        expect(db.getTasks({ limit: 100 }).filter((task) => storyIds.includes(task.story_id ?? "")).length).toBe(0);
+      });
+    });
+
     describe("compactStoryHandoffs", () => {
       it("should compact handoffs for all tasks in a completed story", () => {
         const storyId = db.createStory({ title: "Test story" });
@@ -2032,6 +2089,150 @@ describe("TaskDatabase", () => {
 
         expect(db.getTaskHandoff(task1)).toBeNull();
       });
+    });
+  });
+
+  // ==========================================================================
+  // SQLite Error Mapping Tests
+  // ==========================================================================
+
+  describe("OhnoDatabaseLockedError - class shape", () => {
+    it("MUST: OhnoDatabaseLockedError is exported and constructable", () => {
+      const err = new OhnoDatabaseLockedError("SQLITE_BUSY", "test message");
+      expect(err).toBeInstanceOf(OhnoDatabaseLockedError);
+      expect(err).toBeInstanceOf(Error);
+    });
+
+    it("MUST: OhnoDatabaseLockedError has correct name", () => {
+      const err = new OhnoDatabaseLockedError("SQLITE_BUSY", "test message");
+      expect(err.name).toBe("OhnoDatabaseLockedError");
+    });
+
+    it("MUST: OhnoDatabaseLockedError carries sqliteCode property", () => {
+      const err = new OhnoDatabaseLockedError("SQLITE_BUSY", "test message");
+      expect(err.sqliteCode).toBe("SQLITE_BUSY");
+    });
+
+    it("MUST: OhnoDatabaseLockedError message matches constructor arg", () => {
+      const err = new OhnoDatabaseLockedError("SQLITE_BUSY", "Database is locked by another ohno process");
+      expect(err.message).toBe("Database is locked by another ohno process");
+    });
+  });
+
+  describe("SQLITE_BUSY error message shape", () => {
+    it("MUST: SQLITE_BUSY OhnoDatabaseLockedError has exact spec wording with sqliteCode SQLITE_BUSY", () => {
+      const err = new OhnoDatabaseLockedError(
+        "SQLITE_BUSY",
+        "Database is locked by another ohno process; retry timed out after 5s. Try again, or check for stale ohno-mcp processes with 'ps aux | grep ohno-mcp'."
+      );
+      expect(err.sqliteCode).toBe("SQLITE_BUSY");
+      expect(err.message).toContain("retry timed out after 5s");
+      expect(err.message).toContain("ps aux | grep ohno-mcp");
+    });
+
+    it("MUST: SQLITE_BUSY_SNAPSHOT maps to OhnoDatabaseLockedError with documented retry wording", () => {
+      const err = new OhnoDatabaseLockedError(
+        "SQLITE_BUSY_SNAPSHOT",
+        "Database changed during transaction; retry"
+      );
+      expect(err.sqliteCode).toBe("SQLITE_BUSY_SNAPSHOT");
+      expect(err.message).toBe("Database changed during transaction; retry");
+    });
+  });
+
+  describe("node:sqlite error property verification", () => {
+    it("MUST: node:sqlite throws errors with .errcode=5 for SQLITE_BUSY and .code='ERR_SQLITE_ERROR'", () => {
+      // Use two DatabaseSync connections to the same file with timeout:0 to get immediate SQLITE_BUSY
+      const busyDbPath = join(tempDir, "busy-verify.db");
+      const conn1 = new DatabaseSync(busyDbPath, { timeout: 0 });
+      const conn2 = new DatabaseSync(busyDbPath, { timeout: 0 });
+      conn1.exec("BEGIN EXCLUSIVE");
+      let caughtError: unknown;
+      try {
+        conn2.exec("BEGIN EXCLUSIVE");
+      } catch (e) {
+        caughtError = e;
+      } finally {
+        conn1.exec("ROLLBACK");
+        conn1.close();
+        conn2.close();
+      }
+      // Verify node:sqlite uses .errcode (numeric, 5=SQLITE_BUSY) not .code (which is 'ERR_SQLITE_ERROR')
+      expect(caughtError).toBeDefined();
+      expect((caughtError as { code?: string })?.code).toBe("ERR_SQLITE_ERROR");
+      expect((caughtError as { errcode?: number })?.errcode).toBe(5); // SQLITE_BUSY = 5
+    });
+
+    it("MUST: withTransaction maps SQLITE_BUSY to OhnoDatabaseLockedError", async () => {
+      const lockedDb = await TaskDatabase.open(dbPath);
+      const conn1 = new DatabaseSync(dbPath, { timeout: 0 });
+      conn1.exec("BEGIN EXCLUSIVE");
+      let caught: unknown;
+      try {
+        lockedDb.deleteTask("task-locked");
+      } catch (e) {
+        caught = e;
+      } finally {
+        conn1.exec("ROLLBACK");
+        conn1.close();
+        lockedDb.close();
+      }
+      expect(caught).toBeInstanceOf(OhnoDatabaseLockedError);
+      expect((caught as OhnoDatabaseLockedError).sqliteCode).toBe("SQLITE_BUSY");
+    });
+
+    it("MUST: withTransaction maps SQLITE_BUSY_SNAPSHOT errcode 517 to OhnoDatabaseLockedError", () => {
+      const dbInstance = db as unknown as { db: DatabaseSync };
+      const originalDb = dbInstance.db;
+      dbInstance.db = {
+        exec(sql: string) {
+          if (sql === "BEGIN IMMEDIATE") {
+            const err = new Error("database snapshot is stale") as Error & { code: string; errcode: number };
+            err.code = "ERR_SQLITE_ERROR";
+            err.errcode = 517;
+            throw err;
+          }
+        },
+      } as DatabaseSync;
+
+      let caught: unknown;
+      try {
+        db.deleteTask("task-locked");
+      } catch (e) {
+        caught = e;
+      } finally {
+        dbInstance.db = originalDb;
+      }
+
+      expect(caught).toBeInstanceOf(OhnoDatabaseLockedError);
+      expect((caught as OhnoDatabaseLockedError).sqliteCode).toBe("SQLITE_BUSY_SNAPSHOT");
+    });
+
+    it("MUST: direct write methods map SQLITE_BUSY to OhnoDatabaseLockedError", async () => {
+      const lockedDb = await TaskDatabase.open(dbPath);
+      const conn1 = new DatabaseSync(dbPath, { timeout: 0 });
+
+      for (const write of [
+        () => lockedDb.addTaskActivity("task-locked", "note", "Blocked activity"),
+        () => lockedDb.addTaskFailure("task-locked", "implementation", "Blocked failure", 1),
+        () => lockedDb.setTaskHandoff("task-locked", "PASS", "Blocked handoff"),
+      ]) {
+        conn1.exec("BEGIN EXCLUSIVE");
+        let caught: unknown;
+        try {
+          write();
+        } catch (e) {
+          caught = e;
+        } finally {
+          conn1.exec("ROLLBACK");
+        }
+
+        expect(caught).toBeInstanceOf(OhnoDatabaseLockedError);
+        expect((caught as OhnoDatabaseLockedError).sqliteCode).toBe("SQLITE_BUSY");
+      }
+
+      conn1.close();
+      lockedDb.close();
     });
   });
 });

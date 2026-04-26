@@ -35,16 +35,12 @@
     "test:watch": "vitest",
     "clean": "rm -rf dist"
   },
-  "dependencies": {
-    "sql.js": "^1.11.0"
-  },
   "devDependencies": {
-    "@types/sql.js": "^1.4.9",
     "@types/node": "^22.10.0",
     "typescript": "^5.7.0"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.16.0"
   },
   "license": "MIT"
 }

@@ -14,7 +14,7 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { TaskDatabase, findDbPath, type TaskStatus, type DependencyType } from "@stevestomp/ohno-core";
+import { TaskDatabase, OhnoDatabaseLockedError, findDbPath, type TaskStatus, type DependencyType } from "@stevestomp/ohno-core";
 
 // Zod schemas for tool parameters
 const GetTasksSchema = z.object({
@@ -711,9 +711,10 @@ export function setDb(database: TaskDatabase | null): void {
  * Tool handler - exported for testing
  */
 export async function handleTool(name: string, args: Record<string, unknown>): Promise<unknown> {
-  const database = await getDb();
+  try {
+    const database = await getDb();
 
-  switch (name) {
+    switch (name) {
     case "get_project_status":
       return database.getProjectStatus();
 
@@ -1014,6 +1015,16 @@ export async function handleTool(name: string, args: Record<string, unknown>): P
 
     default:
       throw new Error(`Unknown tool: ${name}`);
+    }
+  } catch (e) {
+    if (e instanceof OhnoDatabaseLockedError) {
+      return {
+        success: false,
+        error: e.message,
+        errorCode: e.sqliteCode,
+      };
+    }
+    throw e;
   }
 }
 

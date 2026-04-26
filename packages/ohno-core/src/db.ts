@@ -1,11 +1,10 @@
 /**
  * TaskDatabase - Core database operations for ohno
  *
- * Uses sql.js (pure JavaScript SQLite) for maximum compatibility.
- * No native bindings required - works on any Node.js version and platform.
+ * Uses Node's built-in node:sqlite (DatabaseSync). Requires Node >= 22.16.
  */
 
-import initSqlJs, { type Database as SqlJsDatabase } from "sql.js";
+import { DatabaseSync } from 'node:sqlite';
 import * as fs from "fs";
 import * as path from "path";
 import type {
@@ -66,81 +65,135 @@ import {
   FIELD_SETS,
 } from "./schema.js";
 
-// Cache the SQL.js initialization promise
-let sqlJsPromise: Promise<initSqlJs.SqlJsStatic> | null = null;
+// SQLite numeric error codes (node:sqlite uses .errcode, not .code, for the SQLite-specific code)
+const SQLITE_BUSY = 5;
+const SQLITE_BUSY_SNAPSHOT = 517; // SQLITE_BUSY | (2 << 8)
+const SQLITE_LOCKED = 6;
 
 /**
- * Initialize sql.js (cached)
+ * Typed error for database lock contention that is recoverable by the user.
+ * Thrown when node:sqlite reports SQLITE_BUSY or SQLITE_BUSY_SNAPSHOT.
  */
-async function getSqlJs(): Promise<initSqlJs.SqlJsStatic> {
-  if (!sqlJsPromise) {
-    sqlJsPromise = initSqlJs();
+export class OhnoDatabaseLockedError extends Error {
+  constructor(public readonly sqliteCode: string, message: string) {
+    super(message);
+    this.name = 'OhnoDatabaseLockedError';
   }
-  return sqlJsPromise;
 }
 
 /**
- * Convert sql.js result to array of objects
+ * Map a node:sqlite error to a typed application error.
+ * node:sqlite errors have .code = 'ERR_SQLITE_ERROR' and .errcode = <numeric SQLite code>.
+ * Always throws; callers use it in catch blocks: try { ... } catch (e) { mapSqliteError(e); }
  */
-function resultToObjects<T>(result: initSqlJs.QueryExecResult[]): T[] {
-  if (result.length === 0) return [];
-  const { columns, values } = result[0];
-  return values.map((row: initSqlJs.SqlValue[]) => {
-    const obj: Record<string, unknown> = {};
-    columns.forEach((col: string, i: number) => {
-      obj[col] = row[i];
-    });
-    return obj as T;
-  });
+function mapSqliteError(e: unknown): never {
+  const errcode = (e as { errcode?: number })?.errcode;
+
+  if (errcode === SQLITE_BUSY) {
+    throw new OhnoDatabaseLockedError(
+      'SQLITE_BUSY',
+      "Database is locked by another ohno process; retry timed out after 5s. Try again, or check for stale ohno-mcp processes with 'ps aux | grep ohno-mcp'."
+    );
+  }
+  if (errcode === SQLITE_BUSY_SNAPSHOT) {
+    throw new OhnoDatabaseLockedError(
+      'SQLITE_BUSY_SNAPSHOT',
+      'Database changed during transaction; retry'
+    );
+  }
+  if (errcode === SQLITE_LOCKED) {
+    // Programmer-level bug, NOT an OhnoDatabaseLockedError
+    const err = new Error('Internal lock conflict (SQLITE_LOCKED) — please report this as a bug.');
+    (err as Error & { sqliteCode?: string }).sqliteCode = 'SQLITE_LOCKED';
+    throw err;
+  }
+  // Pass-through: re-throw with errcode preserved in message if not already there
+  const isNodeSqliteError = (e as { code?: string })?.code === 'ERR_SQLITE_ERROR';
+  if (isNodeSqliteError && errcode !== undefined && e instanceof Error && !e.message.includes(String(errcode))) {
+    throw new Error(`${e.message} [errcode=${errcode}]`, { cause: e });
+  }
+  throw e;
+}
+
+function isDuplicateColumnError(e: unknown): boolean {
+  return e instanceof Error && e.message.toLowerCase().includes("duplicate column name");
 }
 
 export class TaskDatabase {
-  private db: SqlJsDatabase;
-  private dbPath: string;
+  private constructor(private db: DatabaseSync, public readonly dbPath: string) {}
 
   /**
-   * Private constructor - use TaskDatabase.open() instead
+   * Execute fn inside a BEGIN IMMEDIATE transaction.
+   * Acquires the write lock at start, avoiding mid-transaction upgrade races.
+   * If ROLLBACK itself throws, the original error propagates (not the rollback error).
+   * SQLite lock errors (BUSY, BUSY_SNAPSHOT) are mapped to OhnoDatabaseLockedError.
    */
-  private constructor(db: SqlJsDatabase, dbPath: string) {
-    this.db = db;
-    this.dbPath = dbPath;
+  private withTransaction<T>(fn: () => T): T {
+    try {
+      this.db.exec('BEGIN IMMEDIATE');
+    } catch (e) {
+      mapSqliteError(e);
+    }
+
+    try {
+      const result = fn();
+      this.db.exec('COMMIT');
+      return result;
+    } catch (e) {
+      try {
+        this.db.exec('ROLLBACK');
+      } catch {
+        // Swallow rollback errors so the original cause propagates.
+      }
+      // Map SQLite errors before propagating; non-SQLite errors pass through.
+      mapSqliteError(e);
+    }
   }
 
   /**
    * Open or create a database (async factory)
    */
   static async open(dbPath: string): Promise<TaskDatabase> {
-    const SQL = await getSqlJs();
+    fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+    let db: DatabaseSync | undefined;
+    try {
+      db = new DatabaseSync(dbPath, { timeout: 5000 });
 
-    let db: SqlJsDatabase;
-
-    // Load existing database or create new one
-    if (fs.existsSync(dbPath)) {
-      const buffer = fs.readFileSync(dbPath);
-      db = new SQL.Database(buffer);
-    } else {
-      // Ensure directory exists
-      const dir = path.dirname(dbPath);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
+      // Set and verify journal mode. PRAGMA can silently fail (e.g., if the file
+      // is in use by another process holding it in WAL); we assert the result.
+      const journalRows = db.prepare('PRAGMA journal_mode = DELETE').all() as Array<{ journal_mode: string }>;
+      const actualMode = journalRows[0]?.journal_mode;
+      if (actualMode !== 'delete') {
+        db.close();
+        throw new Error(
+          `Failed to set journal_mode = DELETE on ${dbPath}. ` +
+          `SQLite returned mode '${actualMode}'. ` +
+          `This usually means another process has the database open in a different journal mode. ` +
+          `Close other ohno processes and retry.`
+        );
       }
-      db = new SQL.Database();
+
+      db.exec('PRAGMA foreign_keys = ON');
+      db.exec('PRAGMA synchronous = NORMAL');
+
+      const checkRows = db.prepare('PRAGMA quick_check').all() as Array<{ quick_check: string }>;
+      if (checkRows[0]?.quick_check !== 'ok') {
+        db.close();
+        throw new Error(
+          `Database integrity check failed on ${dbPath}: ${checkRows[0]?.quick_check}. ` +
+          `Run 'sqlite3 ${dbPath} ".recover"' to attempt recovery.`
+        );
+      }
+    } catch (e) {
+      // Close db if it was opened before the error occurred
+      try { db?.close(); } catch { /* ignore close errors */ }
+      // Remap SQLite-coded errors; let our own Error messages pass through unchanged.
+      mapSqliteError(e);
     }
 
     const instance = new TaskDatabase(db, dbPath);
     instance.ensureTables();
-    instance.save(); // Save initial state
-
     return instance;
-  }
-
-  /**
-   * Save database to disk
-   */
-  private save(): void {
-    const data = this.db.export();
-    const buffer = Buffer.from(data);
-    fs.writeFileSync(this.dbPath, buffer);
   }
 
   /**
@@ -148,31 +201,34 @@ export class TaskDatabase {
    */
   private ensureTables(): void {
     // Create hierarchy tables
-    this.db.run(CREATE_PROJECTS_TABLE);
-    this.db.run(CREATE_EPICS_TABLE);
-    this.db.run(CREATE_STORIES_TABLE);
+    this.db.prepare(CREATE_PROJECTS_TABLE).run();
+    this.db.prepare(CREATE_EPICS_TABLE).run();
+    this.db.prepare(CREATE_STORIES_TABLE).run();
 
     // Create core tables
-    this.db.run(CREATE_TASKS_TABLE);
-    this.db.run(CREATE_TASK_ACTIVITY_TABLE);
-    this.db.run(CREATE_TASK_FILES_TABLE);
-    this.db.run(CREATE_TASK_DEPENDENCIES_TABLE);
-    this.db.run(CREATE_TASK_FAILURES_TABLE);
-    this.db.run(CREATE_TASK_HANDOFFS_TABLE);
-    this.db.run(CREATE_WORK_QUEUE_TABLE);
+    this.db.prepare(CREATE_TASKS_TABLE).run();
+    this.db.prepare(CREATE_TASK_ACTIVITY_TABLE).run();
+    this.db.prepare(CREATE_TASK_FILES_TABLE).run();
+    this.db.prepare(CREATE_TASK_DEPENDENCIES_TABLE).run();
+    this.db.prepare(CREATE_TASK_FAILURES_TABLE).run();
+    this.db.prepare(CREATE_TASK_HANDOFFS_TABLE).run();
+    this.db.prepare(CREATE_WORK_QUEUE_TABLE).run();
 
     // Add extended columns if missing (backwards compatibility)
     for (const [colName, colType] of EXTENDED_TASK_COLUMNS) {
       try {
-        this.db.run(`ALTER TABLE tasks ADD COLUMN ${colName} ${colType}`);
-      } catch {
-        // Column already exists
+        this.db.prepare(`ALTER TABLE tasks ADD COLUMN ${colName} ${colType}`).run();
+      } catch (e) {
+        if (isDuplicateColumnError(e)) {
+          continue;
+        }
+        mapSqliteError(e);
       }
     }
 
     // Create indexes
     for (const sql of CREATE_INDEXES) {
-      this.db.run(sql);
+      this.db.prepare(sql).run();
     }
   }
 
@@ -180,29 +236,19 @@ export class TaskDatabase {
    * Close the database connection
    */
   close(): void {
-    this.save();
     this.db.close();
   }
 
   /**
    * Reload the database from disk (useful for tests)
-   * This discards any in-memory changes and re-reads from the file.
+   * No-op: with node:sqlite, reads always see the latest committed state.
+   * Kept for backwards compat with tests that called this with sql.js.
+   * To be removed once cli.test.ts call sites are deleted.
    */
   async reload(): Promise<void> {
-    const SQL = await getSqlJs();
-
-    // Close current db
-    this.db.close();
-
-    // Reload from disk
-    if (fs.existsSync(this.dbPath)) {
-      const buffer = fs.readFileSync(this.dbPath);
-      this.db = new SQL.Database(buffer);
-    } else {
-      this.db = new SQL.Database();
-      this.ensureTables();
-      this.save();
-    }
+    // No-op: with node:sqlite, reads always see the latest committed state.
+    // Kept for backwards compat with tests that called this with sql.js.
+    // To be removed once cli.test.ts call sites are deleted.
   }
 
   // ==========================================================================
@@ -213,8 +259,7 @@ export class TaskDatabase {
    * Get aggregated project status
    */
   getProjectStatus(): ProjectStatus {
-    const result = this.db.exec(GET_PROJECT_STATUS);
-    const rows = resultToObjects<Record<string, unknown>>(result);
+    const rows = this.db.prepare(GET_PROJECT_STATUS).all() as Array<Record<string, unknown>>;
 
     if (rows.length === 0) {
       return {
@@ -299,17 +344,7 @@ export class TaskDatabase {
     sql += " LIMIT ?";
     params.push(limit);
 
-    const stmt = this.db.prepare(sql);
-    stmt.bind(params as initSqlJs.BindParams);
-
-    const rows: Task[] = [];
-    while (stmt.step()) {
-      const row = stmt.getAsObject() as unknown as Task;
-      rows.push(row);
-    }
-    stmt.free();
-
-    return rows;
+    return this.db.prepare(sql).all(...(params as never[])) as unknown as Task[];
   }
 
   /**
@@ -348,12 +383,8 @@ export class TaskDatabase {
 
     sql += ` WHERE ${conditions.join(" AND ")}`;
 
-    const stmt = this.db.prepare(sql);
-    stmt.bind(params as initSqlJs.BindParams);
-    stmt.step();
-    const count = (stmt.getAsObject() as { count: number }).count;
-    stmt.free();
-    return count;
+    const row = this.db.prepare(sql).get(...(params as never[])) as { count: number } | undefined;
+    return row?.count ?? 0;
   }
 
   /**
@@ -372,17 +403,7 @@ export class TaskDatabase {
       WHERE t.id = ?
     `;
 
-    const stmt = this.db.prepare(sql);
-    stmt.bind([taskId]);
-
-    if (stmt.step()) {
-      const row = stmt.getAsObject() as unknown as Task;
-      stmt.free();
-      return row;
-    }
-
-    stmt.free();
-    return null;
+    return (this.db.prepare(sql).get(taskId) as Task | undefined) ?? null;
   }
 
   /**
@@ -436,17 +457,14 @@ export class TaskDatabase {
       LIMIT ?
     `;
 
-    const stmt = this.db.prepare(sql);
-    stmt.bind([maxSize]);
     const batch: BatchTask[] = [];
-    while (stmt.step()) {
-      const task = stmt.getAsObject() as unknown as Task;
+    const rows = this.db.prepare(sql).all(maxSize) as unknown as Task[];
+    for (const task of rows) {
       batch.push({
         ...task,
         failure_context: task.needs_rework ? this.getTaskFailures(task.id) : undefined,
       });
     }
-    stmt.free();
 
     // Fallback: if queue is empty (first run or stale), rebuild and retry
     if (batch.length === 0) {
@@ -478,8 +496,7 @@ export class TaskDatabase {
         t.created_at ASC
     `;
 
-    const result = this.db.exec(sql);
-    const candidates = resultToObjects<Task>(result);
+    const candidates = this.db.prepare(sql).all() as unknown as Task[];
     const available = candidates.filter((task) => !this.isTaskBlockedByDependencies(task.id));
     const batch = available.slice(0, maxSize);
 
@@ -518,65 +535,29 @@ export class TaskDatabase {
       ORDER BY created_at DESC
       LIMIT ?
     `;
-    const stmt = this.db.prepare(sql);
-    stmt.bind([taskId, limit]);
-
-    const rows: TaskActivity[] = [];
-    while (stmt.step()) {
-      rows.push(stmt.getAsObject() as unknown as TaskActivity);
-    }
-    stmt.free();
-
-    return rows;
+    return this.db.prepare(sql).all(taskId, limit) as unknown as TaskActivity[];
   }
 
   /**
    * Get recent activity across all tasks
    */
   getRecentActivity(limit = 10): TaskActivity[] {
-    const stmt = this.db.prepare(GET_RECENT_ACTIVITY);
-    stmt.bind([limit]);
-
-    const rows: TaskActivity[] = [];
-    while (stmt.step()) {
-      rows.push(stmt.getAsObject() as unknown as TaskActivity);
-    }
-    stmt.free();
-
-    return rows;
+    return this.db.prepare(GET_RECENT_ACTIVITY).all(limit) as unknown as TaskActivity[];
   }
 
   /**
    * Get dependencies for a task
    */
   getTaskDependencies(taskId: string): TaskDependency[] {
-    const stmt = this.db.prepare(GET_TASK_DEPENDENCIES);
-    stmt.bind([taskId]);
-
-    const rows: TaskDependency[] = [];
-    while (stmt.step()) {
-      rows.push(stmt.getAsObject() as unknown as TaskDependency);
-    }
-    stmt.free();
-
-    return rows;
+    return this.db.prepare(GET_TASK_DEPENDENCIES).all(taskId) as unknown as TaskDependency[];
   }
 
   /**
    * Get blocking (unfinished) dependencies for a task
    */
   getBlockingDependencies(taskId: string): string[] {
-    const stmt = this.db.prepare(GET_BLOCKING_DEPENDENCIES);
-    stmt.bind([taskId]);
-
-    const rows: string[] = [];
-    while (stmt.step()) {
-      const obj = stmt.getAsObject() as unknown as { depends_on_task_id: string };
-      rows.push(obj.depends_on_task_id);
-    }
-    stmt.free();
-
-    return rows;
+    const rows = this.db.prepare(GET_BLOCKING_DEPENDENCIES).all(taskId) as unknown as Array<{ depends_on_task_id: string }>;
+    return rows.map((row) => row.depends_on_task_id);
   }
 
   /**
@@ -596,17 +577,8 @@ export class TaskDatabase {
       WHERE story_id = ?
         AND status NOT IN ('done', 'archived')
     `;
-    const stmt = this.db.prepare(sql);
-    stmt.bind([storyId]);
-
-    let incompleteCount = 0;
-    if (stmt.step()) {
-      const row = stmt.getAsObject() as { incomplete_count: number };
-      incompleteCount = row.incomplete_count;
-    }
-    stmt.free();
-
-    return incompleteCount === 0;
+    const row = this.db.prepare(sql).get(storyId) as { incomplete_count: number } | undefined;
+    return (row?.incomplete_count ?? 0) === 0;
   }
 
   /**
@@ -620,17 +592,8 @@ export class TaskDatabase {
       WHERE s.epic_id = ?
         AND t.status NOT IN ('done', 'archived')
     `;
-    const stmt = this.db.prepare(sql);
-    stmt.bind([epicId]);
-
-    let incompleteCount = 0;
-    if (stmt.step()) {
-      const row = stmt.getAsObject() as { incomplete_count: number };
-      incompleteCount = row.incomplete_count;
-    }
-    stmt.free();
-
-    return incompleteCount === 0;
+    const row = this.db.prepare(sql).get(epicId) as { incomplete_count: number } | undefined;
+    return (row?.incomplete_count ?? 0) === 0;
   }
 
   /**
@@ -672,32 +635,33 @@ export class TaskDatabase {
       taskId = generateTaskId(opts.title, opts.story_id ?? null, `${timestamp}-${counter}`);
     }
 
-    const sql = `
-      INSERT INTO tasks (id, story_id, title, status, task_type, description, estimate_hours, created_at, updated_at, created_by, source)
-      VALUES (?, ?, ?, 'todo', ?, ?, ?, ?, ?, ?, ?)
-    `;
+    return this.withTransaction(() => {
+      const sql = `
+        INSERT INTO tasks (id, story_id, title, status, task_type, description, estimate_hours, created_at, updated_at, created_by, source)
+        VALUES (?, ?, ?, 'todo', ?, ?, ?, ?, ?, ?, ?)
+      `;
 
-    this.db.run(sql, [
-      taskId,
-      opts.story_id ?? null,
-      opts.title,
-      opts.task_type ?? "feature",
-      opts.description ?? null,
-      opts.estimate_hours ?? null,
-      timestamp,
-      timestamp,
-      opts.actor ?? null,
-      opts.source ?? "human",
-    ]);
+      this.db.prepare(sql).run(
+        taskId,
+        opts.story_id ?? null,
+        opts.title,
+        opts.task_type ?? "feature",
+        opts.description ?? null,
+        opts.estimate_hours ?? null,
+        timestamp,
+        timestamp,
+        opts.actor ?? null,
+        opts.source ?? "human",
+      );
 
-    // Log activity
-    this.addTaskActivity(taskId, "created", `Task created: ${opts.title}`, opts.actor);
+      // Log activity
+      this.addTaskActivity(taskId, "created", `Task created: ${opts.title}`, opts.actor);
 
-    // Add to work queue
-    this.recomputeQueueEntry(taskId);
+      // Add to work queue
+      this.recomputeQueueEntry(taskId);
 
-    this.save();
-    return taskId;
+      return taskId;
+    });
   }
 
   /**
@@ -719,16 +683,22 @@ export class TaskDatabase {
       VALUES (?, ?, ?, ?, 'todo', ?, ?)
     `;
 
-    this.db.run(sql, [
-      storyId,
-      opts.epic_id ?? null,
-      opts.title,
-      opts.description ?? null,
-      timestamp,
-      timestamp,
-    ]);
+    try {
+      this.db.prepare(sql).run(
+        storyId,
+        opts.epic_id ?? null,
+        opts.title,
+        opts.description ?? null,
+        timestamp,
+        timestamp,
+      );
+    } catch (e) {
+      if ((e as { code?: string })?.code === 'ERR_SQLITE_ERROR') {
+        mapSqliteError(e);
+      }
+      throw e;
+    }
 
-    this.save();
     return storyId;
   }
 
@@ -737,17 +707,7 @@ export class TaskDatabase {
    */
   getStory(storyId: string): { id: string; epic_id?: string; title: string; description?: string; status?: string; created_at?: string; updated_at?: string } | null {
     const sql = "SELECT * FROM stories WHERE id = ?";
-    const stmt = this.db.prepare(sql);
-    stmt.bind([storyId]);
-
-    if (stmt.step()) {
-      const row = stmt.getAsObject() as { id: string; epic_id?: string; title: string; description?: string; status?: string; created_at?: string; updated_at?: string };
-      stmt.free();
-      return row;
-    }
-
-    stmt.free();
-    return null;
+    return (this.db.prepare(sql).get(storyId) as { id: string; epic_id?: string; title: string; description?: string; status?: string; created_at?: string; updated_at?: string } | undefined) ?? null;
   }
 
   /**
@@ -779,14 +739,15 @@ export class TaskDatabase {
     params.push(storyId);
 
     const sql = `UPDATE stories SET ${setClauses.join(", ")} WHERE id = ?`;
-    this.db.run(sql, params as initSqlJs.BindParams);
-
-    const changes = this.db.getRowsModified();
-    if (changes > 0) {
-      this.save();
+    try {
+      const result = this.db.prepare(sql).run(...(params as never[]));
+      return Number(result.changes) > 0;
+    } catch (e) {
+      if ((e as { code?: string })?.code === 'ERR_SQLITE_ERROR') {
+        mapSqliteError(e);
+      }
+      throw e;
     }
-
-    return changes > 0;
   }
 
   /**
@@ -822,16 +783,7 @@ export class TaskDatabase {
     sql += " LIMIT ? OFFSET ?";
     params.push(limit, offset);
 
-    const stmt = this.db.prepare(sql);
-    stmt.bind(params as initSqlJs.BindParams);
-
-    const rows: Story[] = [];
-    while (stmt.step()) {
-      rows.push(stmt.getAsObject() as unknown as Story);
-    }
-    stmt.free();
-
-    return rows;
+    return this.db.prepare(sql).all(...(params as never[])) as unknown as Story[];
   }
 
   /**
@@ -839,17 +791,7 @@ export class TaskDatabase {
    */
   getEpic(epicId: string): Epic | null {
     const sql = "SELECT * FROM epics WHERE id = ?";
-    const stmt = this.db.prepare(sql);
-    stmt.bind([epicId]);
-
-    if (stmt.step()) {
-      const row = stmt.getAsObject() as unknown as Epic;
-      stmt.free();
-      return row;
-    }
-
-    stmt.free();
-    return null;
+    return (this.db.prepare(sql).get(epicId) as Epic | undefined) ?? null;
   }
 
   /**
@@ -880,16 +822,7 @@ export class TaskDatabase {
     sql += " LIMIT ?";
     params.push(limit);
 
-    const stmt = this.db.prepare(sql);
-    stmt.bind(params as initSqlJs.BindParams);
-
-    const rows: Epic[] = [];
-    while (stmt.step()) {
-      rows.push(stmt.getAsObject() as unknown as Epic);
-    }
-    stmt.free();
-
-    return rows;
+    return this.db.prepare(sql).all(...(params as never[])) as unknown as Epic[];
   }
 
   /**
@@ -911,17 +844,23 @@ export class TaskDatabase {
       VALUES (?, ?, ?, ?, ?, 'todo', ?, ?)
     `;
 
-    this.db.run(sql, [
-      epicId,
-      opts.project_id ?? null,
-      opts.title,
-      opts.description ?? null,
-      opts.priority ?? "P2",
-      timestamp,
-      timestamp,
-    ]);
+    try {
+      this.db.prepare(sql).run(
+        epicId,
+        opts.project_id ?? null,
+        opts.title,
+        opts.description ?? null,
+        opts.priority ?? "P2",
+        timestamp,
+        timestamp,
+      );
+    } catch (e) {
+      if ((e as { code?: string })?.code === 'ERR_SQLITE_ERROR') {
+        mapSqliteError(e);
+      }
+      throw e;
+    }
 
-    this.save();
     return epicId;
   }
 
@@ -954,14 +893,15 @@ export class TaskDatabase {
     params.push(epicId);
 
     const sql = `UPDATE epics SET ${setClauses.join(", ")} WHERE id = ?`;
-    this.db.run(sql, params as initSqlJs.BindParams);
-
-    const changes = this.db.getRowsModified();
-    if (changes > 0) {
-      this.save();
+    try {
+      const result = this.db.prepare(sql).run(...(params as never[]));
+      return Number(result.changes) > 0;
+    } catch (e) {
+      if ((e as { code?: string })?.code === 'ERR_SQLITE_ERROR') {
+        mapSqliteError(e);
+      }
+      throw e;
     }
-
-    return changes > 0;
   }
 
   /**
@@ -992,17 +932,16 @@ export class TaskDatabase {
     params.push(getTimestamp());
     params.push(taskId);
 
-    const sql = `UPDATE tasks SET ${setClauses.join(", ")} WHERE id = ?`;
-    this.db.run(sql, params as initSqlJs.BindParams);
+    return this.withTransaction(() => {
+      const sql = `UPDATE tasks SET ${setClauses.join(", ")} WHERE id = ?`;
+      const result = this.db.prepare(sql).run(...(params as never[]));
 
-    const changes = this.db.getRowsModified();
+      if (Number(result.changes) > 0) {
+        this.addTaskActivity(taskId, "updated", "Task updated", actor);
+      }
 
-    if (changes > 0) {
-      this.addTaskActivity(taskId, "updated", "Task updated", actor);
-      this.save();
-    }
-
-    return changes > 0;
+      return Number(result.changes) > 0;
+    });
   }
 
   /**
@@ -1018,72 +957,73 @@ export class TaskDatabase {
     const oldStatus = task.status;
     const timestamp = getTimestamp();
 
-    // Clear needs_rework when completing or archiving task
-    const clearNeedsRework = status === "done" || status === "archived";
-    const sql = clearNeedsRework
-      ? `
-        UPDATE tasks
-        SET status = ?, updated_at = ?, handoff_notes = COALESCE(?, handoff_notes), needs_rework = 0
-        WHERE id = ?
-      `
-      : `
-        UPDATE tasks
-        SET status = ?, updated_at = ?, handoff_notes = COALESCE(?, handoff_notes)
-        WHERE id = ?
-      `;
+    return this.withTransaction(() => {
+      // Clear needs_rework when completing or archiving task
+      const clearNeedsRework = status === "done" || status === "archived";
+      const sql = clearNeedsRework
+        ? `
+          UPDATE tasks
+          SET status = ?, updated_at = ?, handoff_notes = COALESCE(?, handoff_notes), needs_rework = 0
+          WHERE id = ?
+        `
+        : `
+          UPDATE tasks
+          SET status = ?, updated_at = ?, handoff_notes = COALESCE(?, handoff_notes)
+          WHERE id = ?
+        `;
 
-    this.db.run(sql, [status, timestamp, notes ?? null, taskId]);
-    const changes = this.db.getRowsModified();
+      const result = this.db.prepare(sql).run(status, timestamp, notes ?? null, taskId);
+      const changes = Number(result.changes);
 
-    if (changes > 0) {
-      this.addTaskActivity(
-        taskId,
-        "status_change",
-        `Status changed from ${oldStatus} to ${status}`,
-        actor,
-        oldStatus,
-        status
-      );
+      if (changes > 0) {
+        this.addTaskActivity(
+          taskId,
+          "status_change",
+          `Status changed from ${oldStatus} to ${status}`,
+          actor,
+          oldStatus,
+          status
+        );
 
-      // Auto-summarize on completion
-      if (status === "done" || status === "archived") {
-        this.summarizeTaskActivity(taskId);
-      }
+        // Auto-summarize on completion (use unwrapped impl to avoid nested BEGIN IMMEDIATE)
+        if (status === "done" || status === "archived") {
+          this._summarizeTaskActivityImpl(taskId, false, 5);
+        }
 
-      // Update work queue: remove completed/in-progress tasks, recompute dependents
-      this.recomputeQueueEntry(taskId);
-      if (status === "done" || status === "archived") {
-        this.recomputeQueueDependents(taskId);
-      }
+        // Update work queue: remove completed/in-progress tasks, recompute dependents
+        this.recomputeQueueEntry(taskId);
+        if (status === "done" || status === "archived") {
+          this.recomputeQueueDependents(taskId);
+        }
 
-      this.save();
-
-      // Return boundary metadata when marking as done or archived
-      if (status === "done" || status === "archived") {
-        const boundaries = this.getCompletionBoundaries(taskId);
-        if (boundaries) {
-          return { success: true, boundaries };
+        // Return boundary metadata when marking as done or archived
+        if (status === "done" || status === "archived") {
+          const boundaries = this.getCompletionBoundaries(taskId);
+          if (boundaries) {
+            return { success: true, boundaries };
+          }
         }
       }
-    }
 
-    return { success: changes > 0 };
+      return { success: changes > 0 };
+    });
   }
 
   /**
    * Set handoff notes for a task
    */
   setHandoffNotes(taskId: string, notes: string, actor?: string): boolean {
-    const sql = `UPDATE tasks SET handoff_notes = ?, updated_at = ? WHERE id = ?`;
-    this.db.run(sql, [notes, getTimestamp(), taskId]);
-    const changes = this.db.getRowsModified();
+    return this.withTransaction(() => {
+      const sql = `UPDATE tasks SET handoff_notes = ?, updated_at = ? WHERE id = ?`;
+      const result = this.db.prepare(sql).run(notes, getTimestamp(), taskId);
+      const changes = Number(result.changes);
 
-    if (changes > 0) {
-      this.addTaskActivity(taskId, "note", "Handoff notes updated", actor);
-      this.save();
-    }
+      if (changes > 0) {
+        this.addTaskActivity(taskId, "note", "Handoff notes updated", actor);
+      }
 
-    return changes > 0;
+      return changes > 0;
+    });
   }
 
   /**
@@ -1100,58 +1040,61 @@ export class TaskDatabase {
 
     params.push(taskId);
 
-    const sql = `UPDATE tasks SET ${setClauses.join(", ")} WHERE id = ?`;
-    this.db.run(sql, params as initSqlJs.BindParams);
-    const changes = this.db.getRowsModified();
+    return this.withTransaction(() => {
+      const sql = `UPDATE tasks SET ${setClauses.join(", ")} WHERE id = ?`;
+      const result = this.db.prepare(sql).run(...(params as never[]));
+      const changes = Number(result.changes);
 
-    if (changes > 0) {
-      this.addTaskActivity(taskId, "progress", `Progress updated to ${percent}%`, actor);
-      this.save();
-    }
+      if (changes > 0) {
+        this.addTaskActivity(taskId, "progress", `Progress updated to ${percent}%`, actor);
+      }
 
-    return changes > 0;
+      return changes > 0;
+    });
   }
 
   /**
    * Set a blocker on a task
    */
   setBlocker(taskId: string, reason: string, actor?: string): boolean {
-    const sql = `
-      UPDATE tasks
-      SET status = 'blocked', blockers = ?, updated_at = ?
-      WHERE id = ?
-    `;
+    return this.withTransaction(() => {
+      const sql = `
+        UPDATE tasks
+        SET status = 'blocked', blockers = ?, updated_at = ?
+        WHERE id = ?
+      `;
 
-    this.db.run(sql, [reason, getTimestamp(), taskId]);
-    const changes = this.db.getRowsModified();
+      const result = this.db.prepare(sql).run(reason, getTimestamp(), taskId);
+      const changes = Number(result.changes);
 
-    if (changes > 0) {
-      this.addTaskActivity(taskId, "blocker_set", `Blocked: ${reason}`, actor);
-      this.save();
-    }
+      if (changes > 0) {
+        this.addTaskActivity(taskId, "blocker_set", `Blocked: ${reason}`, actor);
+      }
 
-    return changes > 0;
+      return changes > 0;
+    });
   }
 
   /**
    * Resolve a blocker
    */
   resolveBlocker(taskId: string, actor?: string): boolean {
-    const sql = `
-      UPDATE tasks
-      SET status = 'in_progress', blockers = NULL, updated_at = ?
-      WHERE id = ?
-    `;
+    return this.withTransaction(() => {
+      const sql = `
+        UPDATE tasks
+        SET status = 'in_progress', blockers = NULL, updated_at = ?
+        WHERE id = ?
+      `;
 
-    this.db.run(sql, [getTimestamp(), taskId]);
-    const changes = this.db.getRowsModified();
+      const result = this.db.prepare(sql).run(getTimestamp(), taskId);
+      const changes = Number(result.changes);
 
-    if (changes > 0) {
-      this.addTaskActivity(taskId, "blocker_resolved", "Blocker resolved", actor);
-      this.save();
-    }
+      if (changes > 0) {
+        this.addTaskActivity(taskId, "blocker_resolved", "Blocker resolved", actor);
+      }
 
-    return changes > 0;
+      return changes > 0;
+    });
   }
 
   /**
@@ -1163,27 +1106,28 @@ export class TaskDatabase {
       return false;
     }
 
-    const sql = `
-      UPDATE tasks
-      SET needs_rework = ?, updated_at = ?
-      WHERE id = ?
-    `;
+    return this.withTransaction(() => {
+      const sql = `
+        UPDATE tasks
+        SET needs_rework = ?, updated_at = ?
+        WHERE id = ?
+      `;
 
-    this.db.run(sql, [value ? 1 : 0, getTimestamp(), taskId]);
-    const changes = this.db.getRowsModified();
+      const result = this.db.prepare(sql).run(value ? 1 : 0, getTimestamp(), taskId);
+      const changes = Number(result.changes);
 
-    if (changes > 0) {
-      this.addTaskActivity(
-        taskId,
-        "updated",
-        `Task ${value ? "marked as" : "cleared from"} needs rework`,
-        actor
-      );
-      this.recomputeQueueEntry(taskId);
-      this.save();
-    }
+      if (changes > 0) {
+        this.addTaskActivity(
+          taskId,
+          "updated",
+          `Task ${value ? "marked as" : "cleared from"} needs rework`,
+          actor
+        );
+        this.recomputeQueueEntry(taskId);
+      }
 
-    return changes > 0;
+      return changes > 0;
+    });
   }
 
   /**
@@ -1208,44 +1152,46 @@ export class TaskDatabase {
     }
     const merged = { ...existing, ...wipData };
 
-    const timestamp = getTimestamp();
-    const sql = `UPDATE tasks SET work_in_progress = ?, wip_updated_at = ?, updated_at = ? WHERE id = ?`;
-    this.db.run(sql, [JSON.stringify(merged), timestamp, timestamp, taskId]);
-    const changes = this.db.getRowsModified();
+    return this.withTransaction(() => {
+      const timestamp = getTimestamp();
+      const sql = `UPDATE tasks SET work_in_progress = ?, wip_updated_at = ?, updated_at = ? WHERE id = ?`;
+      const result = this.db.prepare(sql).run(JSON.stringify(merged), timestamp, timestamp, taskId);
+      const changes = Number(result.changes);
 
-    if (changes > 0) {
-      this.addTaskActivity(taskId, "wip_update", "Work in progress updated", actor);
-      this.save();
-    }
+      if (changes > 0) {
+        this.addTaskActivity(taskId, "wip_update", "Work in progress updated", actor);
+      }
 
-    return changes > 0;
+      return changes > 0;
+    });
   }
 
   /**
    * Archive a task
    */
   archiveTask(taskId: string, reason?: string, actor?: string): boolean {
-    const sql = `
-      UPDATE tasks
-      SET status = 'archived', updated_at = ?
-      WHERE id = ?
-    `;
+    return this.withTransaction(() => {
+      const sql = `
+        UPDATE tasks
+        SET status = 'archived', updated_at = ?
+        WHERE id = ?
+      `;
 
-    this.db.run(sql, [getTimestamp(), taskId]);
-    const changes = this.db.getRowsModified();
+      const result = this.db.prepare(sql).run(getTimestamp(), taskId);
+      const changes = Number(result.changes);
 
-    if (changes > 0) {
-      this.addTaskActivity(
-        taskId,
-        "status_change",
-        `Task archived${reason ? `: ${reason}` : ""}`,
-        actor
-      );
-      this.recomputeQueueEntry(taskId);
-      this.save();
-    }
+      if (changes > 0) {
+        this.addTaskActivity(
+          taskId,
+          "status_change",
+          `Task archived${reason ? `: ${reason}` : ""}`,
+          actor
+        );
+        this.recomputeQueueEntry(taskId);
+      }
 
-    return changes > 0;
+      return changes > 0;
+    });
   }
 
   /**
@@ -1261,48 +1207,61 @@ export class TaskDatabase {
       return false;
     }
 
-    const sql = `
-      UPDATE tasks
-      SET status = 'todo', activity_summary = NULL, needs_rework = 0, updated_at = ?
-      WHERE id = ?
-    `;
+    return this.withTransaction(() => {
+      const sql = `
+        UPDATE tasks
+        SET status = 'todo', activity_summary = NULL, needs_rework = 0, updated_at = ?
+        WHERE id = ?
+      `;
 
-    this.db.run(sql, [getTimestamp(), taskId]);
-    const changes = this.db.getRowsModified();
+      const result = this.db.prepare(sql).run(getTimestamp(), taskId);
+      const changes = Number(result.changes);
 
-    if (changes > 0) {
-      this.addTaskActivity(
-        taskId,
-        "reopen",
-        `Task reopened from ${task.status}${notes ? `: ${notes}` : ""}`,
-        actor
-      );
-      this.recomputeQueueEntry(taskId);
-      this.recomputeQueueDependents(taskId);
-      this.save();
-    }
+      if (changes > 0) {
+        this.addTaskActivity(
+          taskId,
+          "reopen",
+          `Task reopened from ${task.status}${notes ? `: ${notes}` : ""}`,
+          actor
+        );
+        this.recomputeQueueEntry(taskId);
+        this.recomputeQueueDependents(taskId);
+      }
 
-    return changes > 0;
+      return changes > 0;
+    });
+  }
+
+  /**
+   * Internal unwrapped implementation for deleting a task.
+   * Called by deleteTask (which wraps it) and by deleteEpic/deleteStory
+   * (which wrap their own outer transaction and call this directly to avoid nesting).
+   */
+  private _deleteTaskImpl(taskId: string): boolean {
+    // Delete related records first
+    this.db.prepare("DELETE FROM task_activity WHERE task_id = ?").run(taskId);
+    this.db.prepare("DELETE FROM task_files WHERE task_id = ?").run(taskId);
+    this.db.prepare("DELETE FROM task_dependencies WHERE task_id = ? OR depends_on_task_id = ?").run(taskId, taskId);
+    this.db.prepare("DELETE FROM work_queue WHERE task_id = ?").run(taskId);
+
+    const result = this.db.prepare("DELETE FROM tasks WHERE id = ?").run(taskId);
+    return Number(result.changes) > 0;
   }
 
   /**
    * Delete a task (hard delete)
    */
   deleteTask(taskId: string): boolean {
-    // Delete related records first
-    this.db.run("DELETE FROM task_activity WHERE task_id = ?", [taskId]);
-    this.db.run("DELETE FROM task_files WHERE task_id = ?", [taskId]);
-    this.db.run("DELETE FROM task_dependencies WHERE task_id = ? OR depends_on_task_id = ?", [taskId, taskId]);
-    this.db.run("DELETE FROM work_queue WHERE task_id = ?", [taskId]);
+    return this.withTransaction(() => this._deleteTaskImpl(taskId));
+  }
 
-    this.db.run("DELETE FROM tasks WHERE id = ?", [taskId]);
-    const changes = this.db.getRowsModified();
+  private getTaskIdsByStory(storyId: string): string[] {
+    const rows = this.db.prepare("SELECT id FROM tasks WHERE story_id = ?").all(storyId) as Array<{ id: string }>;
+    return rows.map((row) => row.id);
+  }
 
-    if (changes > 0) {
-      this.save();
-    }
-
-    return changes > 0;
+  private getStoriesByEpic(epicId: string): Array<{ id: string }> {
+    return this.db.prepare("SELECT id FROM stories WHERE epic_id = ? ORDER BY updated_at DESC, created_at DESC").all(epicId) as Array<{ id: string }>;
   }
 
   /**
@@ -1315,33 +1274,27 @@ export class TaskDatabase {
       return false;
     }
 
-    // Get all stories in this epic
-    const stories = this.getStories({ epic_id: epicId });
+    return this.withTransaction(() => {
+      const stories = this.getStoriesByEpic(epicId);
 
-    // Delete all tasks in each story
-    for (const story of stories) {
-      const tasks = this.getTasks({ limit: 1000 });
-      for (const task of tasks) {
-        if (task.story_id === story.id) {
-          this.deleteTask(task.id);
+      // Delete all tasks in each story
+      for (const story of stories) {
+        for (const taskId of this.getTaskIdsByStory(story.id)) {
+          // Use unwrapped impl to avoid nested BEGIN IMMEDIATE
+          this._deleteTaskImpl(taskId);
         }
       }
-    }
 
-    // Delete all stories in this epic
-    for (const story of stories) {
-      this.db.run("DELETE FROM stories WHERE id = ?", [story.id]);
-    }
+      // Delete all stories in this epic
+      for (const story of stories) {
+        this.db.prepare("DELETE FROM stories WHERE id = ?").run(story.id);
+      }
 
-    // Delete the epic
-    this.db.run("DELETE FROM epics WHERE id = ?", [epicId]);
-    const changes = this.db.getRowsModified();
+      // Delete the epic
+      const result = this.db.prepare("DELETE FROM epics WHERE id = ?").run(epicId);
 
-    if (changes > 0) {
-      this.save();
-    }
-
-    return changes > 0;
+      return Number(result.changes) > 0;
+    });
   }
 
   /**
@@ -1354,23 +1307,18 @@ export class TaskDatabase {
       return false;
     }
 
-    // Delete all tasks in this story
-    const tasks = this.getTasks({ limit: 1000 });
-    for (const task of tasks) {
-      if (task.story_id === storyId) {
-        this.deleteTask(task.id);
+    return this.withTransaction(() => {
+      // Delete all tasks in this story
+      for (const taskId of this.getTaskIdsByStory(storyId)) {
+        // Use unwrapped impl to avoid nested BEGIN IMMEDIATE
+        this._deleteTaskImpl(taskId);
       }
-    }
 
-    // Delete the story
-    this.db.run("DELETE FROM stories WHERE id = ?", [storyId]);
-    const changes = this.db.getRowsModified();
+      // Delete the story
+      const result = this.db.prepare("DELETE FROM stories WHERE id = ?").run(storyId);
 
-    if (changes > 0) {
-      this.save();
-    }
-
-    return changes > 0;
+      return Number(result.changes) > 0;
+    });
   }
 
   // ==========================================================================
@@ -1394,52 +1342,49 @@ export class TaskDatabase {
     const depId = generateDependencyId(taskId, dependsOnTaskId);
 
     // Check if already exists
-    const stmt = this.db.prepare(
+    const existing = this.db.prepare(
       "SELECT id FROM task_dependencies WHERE task_id = ? AND depends_on_task_id = ?"
-    );
-    stmt.bind([taskId, dependsOnTaskId]);
-    const exists = stmt.step();
-    stmt.free();
+    ).get(taskId, dependsOnTaskId);
 
-    if (exists) {
+    if (existing) {
       return null;
     }
 
-    const sql = `
-      INSERT INTO task_dependencies (id, task_id, depends_on_task_id, dependency_type, created_at)
-      VALUES (?, ?, ?, ?, ?)
-    `;
+    return this.withTransaction(() => {
+      const sql = `
+        INSERT INTO task_dependencies (id, task_id, depends_on_task_id, dependency_type, created_at)
+        VALUES (?, ?, ?, ?, ?)
+      `;
 
-    this.db.run(sql, [depId, taskId, dependsOnTaskId, dependencyType, getTimestamp()]);
+      this.db.prepare(sql).run(depId, taskId, dependsOnTaskId, dependencyType, getTimestamp());
 
-    // Recompute both tasks in work queue
-    this.recomputeQueueEntry(taskId);
-    this.recomputeQueueEntry(dependsOnTaskId);
+      // Recompute both tasks in work queue
+      this.recomputeQueueEntry(taskId);
+      this.recomputeQueueEntry(dependsOnTaskId);
 
-    this.save();
-
-    return depId;
+      return depId;
+    });
   }
 
   /**
    * Remove a dependency
    */
   removeDependency(taskId: string, dependsOnTaskId: string): boolean {
-    this.db.run(
-      "DELETE FROM task_dependencies WHERE task_id = ? AND depends_on_task_id = ?",
-      [taskId, dependsOnTaskId]
-    );
+    return this.withTransaction(() => {
+      const result = this.db.prepare(
+        "DELETE FROM task_dependencies WHERE task_id = ? AND depends_on_task_id = ?"
+      ).run(taskId, dependsOnTaskId);
 
-    const changes = this.db.getRowsModified();
+      const changes = Number(result.changes);
 
-    if (changes > 0) {
-      // Recompute both tasks in work queue
-      this.recomputeQueueEntry(taskId);
-      this.recomputeQueueEntry(dependsOnTaskId);
-      this.save();
-    }
+      if (changes > 0) {
+        // Recompute both tasks in work queue
+        this.recomputeQueueEntry(taskId);
+        this.recomputeQueueEntry(dependsOnTaskId);
+      }
 
-    return changes > 0;
+      return changes > 0;
+    });
   }
 
   // ==========================================================================
@@ -1465,24 +1410,38 @@ export class TaskDatabase {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
-    this.db.run(sql, [
-      actId,
-      taskId,
-      activityType,
-      description,
-      oldValue ?? null,
-      newValue ?? null,
-      actor ?? null,
-      timestamp,
-    ]);
+    try {
+      const result = this.db.prepare(sql).run(
+        actId,
+        taskId,
+        activityType,
+        description,
+        oldValue ?? null,
+        newValue ?? null,
+        actor ?? null,
+        timestamp,
+      );
 
-    return this.db.getRowsModified() > 0;
+      return Number(result.changes) > 0;
+    } catch (e) {
+      mapSqliteError(e);
+    }
   }
 
   /**
-   * Summarize task activity into a compressed text
+   * Summarize task activity into a compressed text.
+   * When deleteRaw=true, this performs 2 writes (summary update + raw delete);
+   * the public method wraps in a transaction. Internal callers that already
+   * hold a transaction (e.g., updateTaskStatus) call _summarizeTaskActivityImpl
+   * directly to avoid nested BEGIN IMMEDIATE.
    */
   summarizeTaskActivity(taskId: string, deleteRaw = false, minEntries = 5): string | null {
+    return this.withTransaction(() =>
+      this._summarizeTaskActivityImpl(taskId, deleteRaw, minEntries)
+    );
+  }
+
+  private _summarizeTaskActivityImpl(taskId: string, deleteRaw: boolean, minEntries: number): string | null {
     const activities = this.getTaskActivity(taskId, 100);
 
     if (activities.length < minEntries) {
@@ -1499,20 +1458,18 @@ export class TaskDatabase {
     const summary = lines.join("\n");
 
     // Store summary on task
-    this.db.run("UPDATE tasks SET activity_summary = ? WHERE id = ?", [summary, taskId]);
+    this.db.prepare("UPDATE tasks SET activity_summary = ? WHERE id = ?").run(summary, taskId);
 
     // Optionally delete old entries (keep last 3)
     if (deleteRaw && activities.length > 3) {
       const keepIds = activities.slice(0, 3).map((a) => a.id);
       const placeholders = keepIds.map(() => "?").join(",");
 
-      this.db.run(
-        `DELETE FROM task_activity WHERE task_id = ? AND id NOT IN (${placeholders})`,
-        [taskId, ...keepIds]
-      );
+      this.db.prepare(
+        `DELETE FROM task_activity WHERE task_id = ? AND id NOT IN (${placeholders})`
+      ).run(...([taskId, ...keepIds] as never[]));
     }
 
-    this.save();
     return summary;
   }
 
@@ -1537,16 +1494,19 @@ export class TaskDatabase {
       VALUES (?, ?, ?, ?, ?, ?)
     `;
 
-    this.db.run(sql, [
-      failureId,
-      taskId,
-      failureType,
-      failureReason,
-      attempt ?? null,
-      timestamp,
-    ]);
+    try {
+      this.db.prepare(sql).run(
+        failureId,
+        taskId,
+        failureType,
+        failureReason,
+        attempt ?? null,
+        timestamp,
+      );
+    } catch (e) {
+      mapSqliteError(e);
+    }
 
-    this.save();
     return failureId;
   }
 
@@ -1559,16 +1519,7 @@ export class TaskDatabase {
       WHERE task_id = ?
       ORDER BY created_at DESC
     `;
-    const stmt = this.db.prepare(sql);
-    stmt.bind([taskId]);
-
-    const rows: TaskFailure[] = [];
-    while (stmt.step()) {
-      rows.push(stmt.getAsObject() as unknown as TaskFailure);
-    }
-    stmt.free();
-
-    return rows;
+    return this.db.prepare(sql).all(taskId) as unknown as TaskFailure[];
   }
 
   // ==========================================================================
@@ -1591,19 +1542,19 @@ export class TaskDatabase {
       INSERT OR REPLACE INTO task_handoffs (task_id, status, summary, files_changed, full_details, created_at)
       VALUES (?, ?, ?, ?, ?, ?)
     `;
-    this.db.run(sql, [
-      taskId,
-      status,
-      summary,
-      filesChanged ? JSON.stringify(filesChanged) : null,
-      fullDetails ?? null,
-      timestamp,
-    ]);
-    const changes = this.db.getRowsModified();
-    if (changes > 0) {
-      this.save();
+    try {
+      const result = this.db.prepare(sql).run(
+        taskId,
+        status,
+        summary,
+        filesChanged ? JSON.stringify(filesChanged) : null,
+        fullDetails ?? null,
+        timestamp,
+      );
+      return Number(result.changes) > 0;
+    } catch (e) {
+      mapSqliteError(e);
     }
-    return changes > 0;
   }
 
   /**
@@ -1614,23 +1565,17 @@ export class TaskDatabase {
     const sql = includeDetails
       ? `SELECT * FROM task_handoffs WHERE task_id = ?`
       : `SELECT task_id, status, summary, files_changed, created_at, compacted_at FROM task_handoffs WHERE task_id = ?`;
-    const stmt = this.db.prepare(sql);
-    stmt.bind([taskId]);
-    if (stmt.step()) {
-      const row = stmt.getAsObject();
-      stmt.free();
-      return {
-        task_id: row.task_id as string,
-        status: row.status as HandoffStatus,
-        summary: row.summary as string,
-        files_changed: row.files_changed ? JSON.parse(row.files_changed as string) : undefined,
-        full_details: includeDetails ? (row.full_details !== null ? row.full_details as string : null) : undefined,
-        created_at: row.created_at as string ?? undefined,
-        compacted_at: row.compacted_at !== null ? row.compacted_at as string : null,
-      };
-    }
-    stmt.free();
-    return null;
+    const row = this.db.prepare(sql).get(taskId) as Record<string, unknown> | undefined;
+    if (!row) return null;
+    return {
+      task_id: row.task_id as string,
+      status: row.status as HandoffStatus,
+      summary: row.summary as string,
+      files_changed: row.files_changed ? JSON.parse(row.files_changed as string) : undefined,
+      full_details: includeDetails ? (row.full_details !== null ? row.full_details as string : null) : undefined,
+      created_at: row.created_at as string ?? undefined,
+      compacted_at: row.compacted_at !== null ? row.compacted_at as string : null,
+    };
   }
 
   // ==========================================================================
@@ -1643,48 +1588,38 @@ export class TaskDatabase {
    * Skips blocked/failed tasks (preserve for debugging).
    */
   compactStoryHandoffs(storyId: string): number {
-    // Get all tasks in the story
+    // Get all tasks in the story and their handoffs before the transaction
     const sql = `SELECT id, status FROM tasks WHERE story_id = ?`;
-    const stmt = this.db.prepare(sql);
-    stmt.bind([storyId]);
+    const taskRows = this.db.prepare(sql).all(storyId) as Array<{ id: string; status: string }>;
 
-    const taskRows: Array<{ id: string; status: string }> = [];
-    while (stmt.step()) {
-      const row = stmt.getAsObject();
-      taskRows.push({
-        id: row.id as string,
-        status: row.status as string,
-      });
-    }
-    stmt.free();
-
-    let compacted = 0;
-    const timestamp = getTimestamp();
-
-    for (const task of taskRows) {
-      // Skip blocked tasks
-      if (task.status === "blocked") continue;
-
-      // Check handoff - need full details to see if already compacted
+    // Filter eligible tasks outside the transaction (reads)
+    const eligible = taskRows.filter((task) => {
+      if (task.status === "blocked") return false;
       const handoff = this.getTaskHandoff(task.id, true);
-      if (!handoff) continue;
-      if (handoff.status === "FAIL" || handoff.status === "BLOCKED") continue;
+      if (!handoff) return false;
+      if (handoff.status === "FAIL" || handoff.status === "BLOCKED") return false;
+      if (handoff.full_details === null || handoff.full_details === undefined) return false;
+      return true;
+    });
 
-      // Skip if already compacted (full_details is already null or undefined)
-      if (handoff.full_details === null || handoff.full_details === undefined) continue;
+    if (eligible.length === 0) return 0;
 
-      // Compact: null out full_details, set compacted_at
-      this.db.run(
-        `UPDATE task_handoffs SET full_details = NULL, compacted_at = ? WHERE task_id = ?`,
-        [timestamp, task.id]
-      );
-      if (this.db.getRowsModified() > 0) {
-        compacted++;
+    return this.withTransaction(() => {
+      let compacted = 0;
+      const timestamp = getTimestamp();
+
+      for (const task of eligible) {
+        // Compact: null out full_details, set compacted_at
+        const result = this.db.prepare(
+          `UPDATE task_handoffs SET full_details = NULL, compacted_at = ? WHERE task_id = ?`
+        ).run(timestamp, task.id);
+        if (Number(result.changes) > 0) {
+          compacted++;
+        }
       }
-    }
 
-    if (compacted > 0) this.save();
-    return compacted;
+      return compacted;
+    });
   }
 
   /**
@@ -1695,53 +1630,38 @@ export class TaskDatabase {
   deleteEpicHandoffs(epicId: string): number {
     // Get all stories in the epic
     const storySql = `SELECT id FROM stories WHERE epic_id = ?`;
-    const storyStmt = this.db.prepare(storySql);
-    storyStmt.bind([epicId]);
+    const storyRows = this.db.prepare(storySql).all(epicId) as Array<{ id: string }>;
 
-    const storyRows: Array<{ id: string }> = [];
-    while (storyStmt.step()) {
-      const row = storyStmt.getAsObject();
-      storyRows.push({ id: row.id as string });
-    }
-    storyStmt.free();
-
-    let deleted = 0;
-
+    // Collect eligible task IDs outside the transaction (reads)
+    const eligibleTaskIds: string[] = [];
     for (const story of storyRows) {
-      // Get all tasks in the story
       const taskSql = `SELECT id, status FROM tasks WHERE story_id = ?`;
-      const taskStmt = this.db.prepare(taskSql);
-      taskStmt.bind([story.id]);
-
-      const taskRows: Array<{ id: string; status: string }> = [];
-      while (taskStmt.step()) {
-        const row = taskStmt.getAsObject();
-        taskRows.push({
-          id: row.id as string,
-          status: row.status as string,
-        });
-      }
-      taskStmt.free();
+      const taskRows = this.db.prepare(taskSql).all(story.id) as Array<{ id: string; status: string }>;
 
       for (const task of taskRows) {
-        // Skip blocked tasks
         if (task.status === "blocked") continue;
-
-        // Check handoff status - skip FAIL and BLOCKED
         const handoff = this.getTaskHandoff(task.id, false);
         if (!handoff) continue;
         if (handoff.status === "FAIL" || handoff.status === "BLOCKED") continue;
-
-        // Delete handoff
-        this.db.run(`DELETE FROM task_handoffs WHERE task_id = ?`, [task.id]);
-        if (this.db.getRowsModified() > 0) {
-          deleted++;
-        }
+        eligibleTaskIds.push(task.id);
       }
     }
 
-    if (deleted > 0) this.save();
-    return deleted;
+    if (eligibleTaskIds.length === 0) return 0;
+
+    return this.withTransaction(() => {
+      let deleted = 0;
+
+      for (const taskId of eligibleTaskIds) {
+        // Delete handoff
+        const result = this.db.prepare(`DELETE FROM task_handoffs WHERE task_id = ?`).run(taskId);
+        if (Number(result.changes) > 0) {
+          deleted++;
+        }
+      }
+
+      return deleted;
+    });
   }
 
   // ==========================================================================
@@ -1778,13 +1698,8 @@ export class TaskDatabase {
       SELECT COUNT(*) as count FROM task_dependencies
       WHERE depends_on_task_id = ?
     `;
-    const stmt = this.db.prepare(blocksSql);
-    stmt.bind([taskId]);
-    if (stmt.step()) {
-      const row = stmt.getAsObject() as { count: number };
-      score += (row.count ?? 0) * 50;
-    }
-    stmt.free();
+    const row = this.db.prepare(blocksSql).get(taskId) as { count: number } | undefined;
+    score += (row?.count ?? 0) * 50;
 
     return Math.round(score * 100) / 100;
   }
@@ -1796,14 +1711,14 @@ export class TaskDatabase {
   recomputeQueueEntry(taskId: string): void {
     const task = this.getTask(taskId);
     if (!task) {
-      this.db.run("DELETE FROM work_queue WHERE task_id = ?", [taskId]);
+      this.db.prepare("DELETE FROM work_queue WHERE task_id = ?").run(taskId);
       return;
     }
 
     // Only queue tasks that are todo or needs_rework
     const eligible = (task.status === "todo" || (task.needs_rework && task.status !== "archived"));
     if (!eligible) {
-      this.db.run("DELETE FROM work_queue WHERE task_id = ?", [taskId]);
+      this.db.prepare("DELETE FROM work_queue WHERE task_id = ?").run(taskId);
       return;
     }
 
@@ -1817,11 +1732,10 @@ export class TaskDatabase {
     const priorityMap: Record<string, number> = { P0: 0, P1: 1, P2: 2, P3: 3 };
     const batchGroup = priorityMap[task.epic_priority ?? "P2"] ?? 2;
 
-    this.db.run(
+    this.db.prepare(
       `INSERT OR REPLACE INTO work_queue (task_id, priority_score, batch_group, blocked_by, ready, computed_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [taskId, score, batchGroup, blockedBy, ready, timestamp]
-    );
+       VALUES (?, ?, ?, ?, ?, ?)`
+    ).run(taskId, score, batchGroup, blockedBy, ready, timestamp);
   }
 
   /**
@@ -1833,14 +1747,8 @@ export class TaskDatabase {
       SELECT task_id FROM task_dependencies
       WHERE depends_on_task_id = ?
     `;
-    const stmt = this.db.prepare(sql);
-    stmt.bind([taskId]);
-    const dependentIds: string[] = [];
-    while (stmt.step()) {
-      const row = stmt.getAsObject() as { task_id: string };
-      dependentIds.push(row.task_id);
-    }
-    stmt.free();
+    const rows = this.db.prepare(sql).all(taskId) as Array<{ task_id: string }>;
+    const dependentIds = rows.map((row) => row.task_id);
 
     for (const depId of dependentIds) {
       this.recomputeQueueEntry(depId);
@@ -1852,23 +1760,22 @@ export class TaskDatabase {
    * Called on first use or when queue is detected as stale.
    */
   rebuildWorkQueue(): void {
-    // Clear existing queue
-    this.db.run("DELETE FROM work_queue");
-
-    // Get all eligible tasks
+    // Get all eligible tasks before the transaction
     const sql = `
       SELECT t.id
       FROM tasks t
       WHERE (t.status = 'todo' OR t.needs_rework = 1)
         AND t.status != 'archived'
     `;
-    const result = this.db.exec(sql);
-    const tasks = resultToObjects<{ id: string }>(result);
+    const tasks = this.db.prepare(sql).all() as Array<{ id: string }>;
 
-    for (const task of tasks) {
-      this.recomputeQueueEntry(task.id);
-    }
+    this.withTransaction(() => {
+      // Clear existing queue
+      this.db.prepare("DELETE FROM work_queue").run();
 
-    this.save();
+      for (const task of tasks) {
+        this.recomputeQueueEntry(task.id);
+      }
+    });
   }
 }
