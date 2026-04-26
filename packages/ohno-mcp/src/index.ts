@@ -11,6 +11,7 @@
  *   OHNO_DB_PATH - Path to tasks.db file
  */
 
+import "./node-guard.js";
 import { runServer } from "./server.js";
 
 // Parse args
