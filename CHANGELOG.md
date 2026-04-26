@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.20.0 — 2026-04-26
+
+### Fixed
+- `ohno-cli` invoked from inside a git worktree now writes to the canonical
+  project DB (`<repo>/.ohno/tasks.db`) instead of a worktree-local copy (#38).
+  Path resolution uses `git rev-parse` to find the canonical project root;
+  falls back to cwd-walking when not in a git repo. Handles linked worktrees,
+  submodules (each submodule resolves to its own .ohno), bare repos, and
+  external gitdirs (`git init --separate-git-dir=...`).
+
+### Migration note
+If you've been running ohno-cli inside a git worktree, you may have stale
+`.ohno/` directories there. After upgrading, you can safely remove them:
+`rm -rf <worktree>/.ohno`.
+
+### Known issue (deferred to 1.0.0)
+Concurrent writes from multiple `ohno-mcp` processes can still silently
+overwrite each other (#36). 1.0.0 fixes this via a switch to Node's built-in
+`node:sqlite`.
+
 ## [0.16.2] - 2026-02-05
 
 ### Added
