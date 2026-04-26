@@ -3,6 +3,10 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { execFileSync } from 'node:child_process';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -15,8 +19,71 @@ import {
   findDbPath,
   ensureOhnoDir,
   sortByPriority,
+  tryGit,
+  getGitContext,
+  resolveCanonicalProjectRoot,
 } from "./utils.js";
 import type { Task } from "./types.js";
+
+describe('tryGit', () => {
+  let tmpDir: string;
+  beforeEach(() => { tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ohno-trygit-')); });
+  afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
+
+  it('returns trimmed stdout for a successful git invocation', () => {
+    execFileSync('git', ['init'], { cwd: tmpDir, stdio: 'ignore' });
+    expect(tryGit(['rev-parse', '--is-inside-work-tree'], tmpDir)).toBe('true');
+  });
+
+  it('returns null when invoked in a non-git directory (does not throw)', () => {
+    expect(tryGit(['rev-parse', '--is-inside-work-tree'], tmpDir)).toBeNull();
+  });
+});
+
+describe('getGitContext', () => {
+  let tmpDir: string;
+  beforeEach(() => { tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ohno-gctx-')); });
+  afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
+
+  it('returns null in a non-git directory', () => {
+    expect(getGitContext(tmpDir)).toBeNull();
+  });
+
+  it('returns null in a bare repo', () => {
+    const bare = path.join(tmpDir, 'bare.git');
+    fs.mkdirSync(bare);
+    execFileSync('git', ['init', '--bare'], { cwd: bare, stdio: 'ignore' });
+    expect(getGitContext(bare)).toBeNull();
+  });
+
+  it('populates all fields in a normal working tree', () => {
+    execFileSync('git', ['init'], { cwd: tmpDir, stdio: 'ignore' });
+    const ctx = getGitContext(tmpDir);
+    expect(ctx).not.toBeNull();
+    expect(ctx!.insideWorkTree).toBe(true);
+    expect(path.isAbsolute(ctx!.commonDir)).toBe(true);
+    expect(ctx!.superprojectRoot).toBeNull();
+  });
+});
+
+describe('resolveCanonicalProjectRoot', () => {
+  it('returns topLevel for a submodule', () => {
+    expect(resolveCanonicalProjectRoot({
+      insideWorkTree: true,
+      commonDir: '/parent/.git/modules/sub',
+      topLevel: '/parent/sub',
+      superprojectRoot: '/parent',
+    })).toBe('/parent/sub');
+  });
+  it('returns dirname(commonDir) for a normal repo / linked worktree', () => {
+    expect(resolveCanonicalProjectRoot({
+      insideWorkTree: true,
+      commonDir: '/repo/.git',
+      topLevel: '/repo/.worktrees/feat',
+      superprojectRoot: null,
+    })).toBe('/repo');
+  });
+});
 
 describe("ID Generation", () => {
   describe("generateTaskId", () => {
