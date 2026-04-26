@@ -715,8 +715,8 @@ export async function handleTool(name: string, args: Record<string, unknown>): P
     const database = await getDb();
 
     switch (name) {
-      case "get_project_status":
-        return database.getProjectStatus();
+    case "get_project_status":
+      return database.getProjectStatus();
 
     case "get_session_context":
       return database.getSessionContext();
@@ -1013,8 +1013,8 @@ export async function handleTool(name: string, args: Record<string, unknown>): P
       return { deleted: count };
     }
 
-      default:
-        throw new Error(`Unknown tool: ${name}`);
+    default:
+      throw new Error(`Unknown tool: ${name}`);
     }
   } catch (e) {
     if (e instanceof OhnoDatabaseLockedError) {
