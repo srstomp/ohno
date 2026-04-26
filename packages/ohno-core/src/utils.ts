@@ -9,6 +9,7 @@ import path from "node:path";
 
 export interface GitContext {
   insideWorkTree: boolean;
+  gitDir: string;       // per-worktree gitdir from `git rev-parse --git-dir`
   commonDir: string;
   topLevel: string;
   superprojectRoot: string | null;
@@ -27,6 +28,9 @@ export function tryGit(args: string[], cwd: string): string | null {
 export function getGitContext(cwd: string): GitContext | null {
   const insideWorkTreeStr = tryGit(['rev-parse', '--is-inside-work-tree'], cwd);
   if (insideWorkTreeStr !== 'true') return null;
+  const gitDirRaw = tryGit(['rev-parse', '--git-dir'], cwd);
+  if (!gitDirRaw) return null;
+  const gitDir = path.isAbsolute(gitDirRaw) ? gitDirRaw : path.resolve(cwd, gitDirRaw);
   const commonDir = tryGit(['rev-parse', '--git-common-dir'], cwd);
   const topLevel  = tryGit(['rev-parse', '--show-toplevel'], cwd);
   if (!commonDir || !topLevel) return null;
@@ -34,6 +38,7 @@ export function getGitContext(cwd: string): GitContext | null {
   const superprojectRoot = superRaw && superRaw.length > 0 ? superRaw : null;
   return {
     insideWorkTree: true,
+    gitDir,
     commonDir: path.isAbsolute(commonDir) ? commonDir : path.resolve(cwd, commonDir),
     topLevel,
     superprojectRoot,
@@ -42,11 +47,9 @@ export function getGitContext(cwd: string): GitContext | null {
 
 export function resolveCanonicalProjectRoot(ctx: GitContext): string | null {
   if (ctx.superprojectRoot !== null) return ctx.topLevel;
-  // Normal repos and linked worktrees: commonDir is `<root>/.git` so
-  // dirname gives the canonical project root. External gitdirs (created via
-  // `git init --separate-git-dir=...`) have commonDir pointing at the gitdir
-  // itself, so dirname would give the gitdir's parent — fall back to topLevel.
-  if (path.basename(ctx.commonDir) === '.git') {
+  // Linked worktrees have a per-worktree gitDir distinct from the canonical commonDir.
+  // Normal repos and external gitdirs have gitDir === commonDir.
+  if (ctx.gitDir !== ctx.commonDir) {
     return path.dirname(ctx.commonDir);
   }
   return ctx.topLevel;
