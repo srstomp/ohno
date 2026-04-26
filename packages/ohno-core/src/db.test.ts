@@ -6,6 +6,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import type { DatabaseSync } from "node:sqlite";
 import { TaskDatabase } from "./db.js";
 import type { TaskStatus } from "./types.js";
 
@@ -755,25 +756,22 @@ describe("TaskDatabase", () => {
     // Helper function to set up hierarchy: epic -> story -> tasks
     const setupHierarchy = () => {
       // Access the private db property for direct SQL
-      const dbInstance = db as unknown as { db: { run: (sql: string, params?: unknown[]) => void } };
+      const dbInstance = db as unknown as { db: DatabaseSync };
 
       // Create an epic
-      dbInstance.db.run(
-        "INSERT INTO epics (id, title, priority) VALUES (?, ?, ?)",
-        ["epic-1", "Epic 1", "P0"]
-      );
+      dbInstance.db.prepare(
+        "INSERT INTO epics (id, title, priority) VALUES (?, ?, ?)"
+      ).run("epic-1", "Epic 1", "P0");
 
       // Create a story
-      dbInstance.db.run(
-        "INSERT INTO stories (id, epic_id, title) VALUES (?, ?, ?)",
-        ["story-1", "epic-1", "Story 1"]
-      );
+      dbInstance.db.prepare(
+        "INSERT INTO stories (id, epic_id, title) VALUES (?, ?, ?)"
+      ).run("story-1", "epic-1", "Story 1");
 
       // Create another story in the same epic
-      dbInstance.db.run(
-        "INSERT INTO stories (id, epic_id, title) VALUES (?, ?, ?)",
-        ["story-2", "epic-1", "Story 2"]
-      );
+      dbInstance.db.prepare(
+        "INSERT INTO stories (id, epic_id, title) VALUES (?, ?, ?)"
+      ).run("story-2", "epic-1", "Story 2");
     };
 
     describe("isStoryCompleted", () => {
@@ -1544,11 +1542,10 @@ describe("TaskDatabase", () => {
         const taskId = db.createTask({ title: "Invalid WIP" });
 
         // Manually insert invalid JSON (edge case)
-        const dbInstance = db as unknown as { db: { run: (sql: string, params?: unknown[]) => void } };
-        dbInstance.db.run(
-          "UPDATE tasks SET work_in_progress = ? WHERE id = ?",
-          ["invalid json{", taskId]
-        );
+        const dbInstance = db as unknown as { db: DatabaseSync };
+        dbInstance.db.prepare(
+          "UPDATE tasks SET work_in_progress = ? WHERE id = ?"
+        ).run("invalid json{", taskId);
 
         // Should treat as empty object and continue
         const result = db.updateTaskWip(taskId, { phase: "recovery" });
