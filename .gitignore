@@ -9,6 +9,7 @@
 .claude/
 .ohno/
 .worktrees/
+plans/
 
 # Python
 __pycache__/
