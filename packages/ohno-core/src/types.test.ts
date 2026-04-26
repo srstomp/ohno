@@ -32,6 +32,17 @@ describe("Story Types", () => {
       expect(story.status).toBe("todo");
     });
 
+    it("should allow minimal list response fields", () => {
+      const story: Story = {
+        id: "story-123",
+        epic_id: "epic-456",
+        title: "User Authentication",
+        status: "todo",
+      };
+
+      expect(story.description).toBeUndefined();
+    });
+
     it("should allow null epic_id", () => {
       const story: Story = {
         id: "story-123",
@@ -146,12 +157,16 @@ describe("Story Types", () => {
         status: "done",
         limit: 5,
         offset: 0,
+        fields: "minimal",
+        search: "migration",
       };
 
       expect(options.epic_id).toBe("epic-456");
       expect(options.status).toBe("done");
       expect(options.limit).toBe(5);
       expect(options.offset).toBe(0);
+      expect(options.fields).toBe("minimal");
+      expect(options.search).toBe("migration");
     });
   });
 });

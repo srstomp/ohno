@@ -22,8 +22,10 @@ const GetTasksSchema = z.object({
   priority: z.enum(["P0", "P1", "P2", "P3"]).optional(),
   story_status: z.enum(["todo", "in_progress", "review", "done", "blocked"]).optional(),
   epic_status: z.enum(["todo", "in_progress", "review", "done", "blocked"]).optional(),
-  limit: z.number().min(1).max(100).default(50),
+  limit: z.number().min(1).max(100).default(10),
+  offset: z.number().min(0).default(0),
   fields: z.enum(["minimal", "standard", "full"]).default("minimal"),
+  search: z.string().min(1).optional(),
 });
 
 const TaskIdSchema = z.object({
@@ -147,8 +149,10 @@ const StoryIdSchema = z.object({
 const GetStoriesSchema = z.object({
   epic_id: z.string().optional(),
   status: z.enum(["todo", "in_progress", "done"]).optional(),
-  limit: z.number().min(1).max(100).default(50),
+  limit: z.number().min(1).max(100).default(10),
   offset: z.number().min(0).default(0),
+  fields: z.enum(["minimal", "standard", "full"]).default("minimal"),
+  search: z.string().min(1).optional(),
 });
 
 const UpdateStorySchema = z.object({
@@ -170,7 +174,9 @@ const UpdateEpicSchema = z.object({
 const GetEpicsSchema = z.object({
   status: z.enum(["todo", "in_progress", "review", "done", "blocked"]).optional(),
   priority: z.enum(["P0", "P1", "P2", "P3"]).optional(),
-  limit: z.number().min(1).max(100).default(50),
+  limit: z.number().min(1).max(100).default(10),
+  fields: z.enum(["minimal", "standard", "full"]).default("minimal"),
+  search: z.string().min(1).optional(),
 });
 
 const KanbanBoardSchema = z.object({
@@ -225,8 +231,10 @@ const TOOLS = [
         priority: { type: "string", enum: ["P0", "P1", "P2", "P3"], description: "Filter by epic priority" },
         story_status: { type: "string", enum: ["todo", "in_progress", "review", "done", "blocked"], description: "Filter by parent story status" },
         epic_status: { type: "string", enum: ["todo", "in_progress", "review", "done", "blocked"], description: "Filter by parent epic status" },
-        limit: { type: "number", description: "Maximum tasks to return (1-100)", default: 50 },
+        limit: { type: "number", description: "Maximum tasks to return (1-100)", default: 10 },
+        offset: { type: "number", description: "Number of tasks to skip", default: 0 },
         fields: { type: "string", enum: ["minimal", "standard", "full"], description: "Field set to return: minimal (default, for selection), standard (with descriptions), full (all fields)", default: "minimal" },
+        search: { type: "string", description: "Case-insensitive title substring search" },
       },
     },
   },
@@ -395,14 +403,16 @@ const TOOLS = [
   },
   {
     name: "list_stories",
-    description: "List stories with optional filtering by epic and status",
+    description: "List stories with optional filtering by epic, status, and title. Returns minimal fields by default for efficiency.",
     inputSchema: {
       type: "object" as const,
       properties: {
         epic_id: { type: "string", description: "Filter by epic ID" },
         status: { type: "string", enum: ["todo", "in_progress", "done"], description: "Filter by story status" },
-        limit: { type: "number", description: "Maximum stories to return (1-100)", default: 50 },
+        limit: { type: "number", description: "Maximum stories to return (1-100)", default: 10 },
         offset: { type: "number", description: "Number of stories to skip", default: 0 },
+        fields: { type: "string", enum: ["minimal", "standard", "full"], description: "Field set to return: minimal (default, no descriptions), standard (with descriptions), full (all fields)", default: "minimal" },
+        search: { type: "string", description: "Case-insensitive title substring search" },
       },
     },
   },
@@ -448,13 +458,15 @@ const TOOLS = [
   },
   {
     name: "get_epics",
-    description: "List epics with optional filtering by status and priority",
+    description: "List epics with optional filtering by status, priority, and title. Returns minimal fields by default for efficiency.",
     inputSchema: {
       type: "object" as const,
       properties: {
         status: { type: "string", enum: ["todo", "in_progress", "review", "done", "blocked"], description: "Filter by status" },
         priority: { type: "string", enum: ["P0", "P1", "P2", "P3"], description: "Filter by priority" },
-        limit: { type: "number", description: "Maximum epics to return (1-100)", default: 50 },
+        limit: { type: "number", description: "Maximum epics to return (1-100)", default: 10 },
+        fields: { type: "string", enum: ["minimal", "standard", "full"], description: "Field set to return: minimal (default, no descriptions), standard (with descriptions), full (all fields)", default: "minimal" },
+        search: { type: "string", description: "Case-insensitive title substring search" },
       },
     },
   },

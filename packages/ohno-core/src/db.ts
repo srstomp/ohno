@@ -70,6 +70,18 @@ const SQLITE_BUSY = 5;
 const SQLITE_BUSY_SNAPSHOT = 517; // SQLITE_BUSY | (2 << 8)
 const SQLITE_LOCKED = 6;
 
+const STORY_FIELD_SETS: Record<FieldSet, string[]> = {
+  minimal: ["id", "title", "status", "epic_id"],
+  standard: ["id", "title", "status", "epic_id", "description", "created_at", "updated_at"],
+  full: ["id", "epic_id", "title", "description", "status", "created_at", "updated_at"],
+};
+
+const EPIC_FIELD_SETS: Record<FieldSet, string[]> = {
+  minimal: ["id", "title", "status", "priority"],
+  standard: ["id", "project_id", "title", "description", "priority", "status", "created_at", "updated_at"],
+  full: ["id", "project_id", "title", "description", "priority", "status", "created_at", "updated_at"],
+};
+
 /**
  * Typed error for database lock contention that is recoverable by the user.
  * Thrown when node:sqlite reports SQLITE_BUSY or SQLITE_BUSY_SNAPSHOT.
@@ -301,7 +313,7 @@ export class TaskDatabase {
    * Get tasks with optional filtering
    */
   getTasks(opts: GetTasksOptions = {}): Task[] {
-    const { status, epic_id, priority, story_status, epic_status, limit = 50, fields = "minimal" } = opts;
+    const { status, epic_id, priority, story_status, epic_status, limit = 10, offset = 0, fields = "minimal", search } = opts;
 
     // Build SELECT clause based on fields parameter
     const fieldSet = FIELD_SETS[fields] || FIELD_SETS.minimal;
@@ -339,10 +351,15 @@ export class TaskDatabase {
       params.push(epic_status);
     }
 
+    if (search) {
+      conditions.push("LOWER(t.title) LIKE LOWER(?)");
+      params.push(`%${search}%`);
+    }
+
     sql += ` WHERE ${conditions.join(" AND ")}`;
     sql += " ORDER BY CASE t.status WHEN 'in_progress' THEN 0 WHEN 'review' THEN 1 WHEN 'blocked' THEN 2 WHEN 'todo' THEN 3 WHEN 'done' THEN 4 ELSE 5 END, t.updated_at DESC, t.created_at DESC";
-    sql += " LIMIT ?";
-    params.push(limit);
+    sql += " LIMIT ? OFFSET ?";
+    params.push(limit, offset);
 
     return this.db.prepare(sql).all(...(params as never[])) as unknown as Task[];
   }
@@ -351,7 +368,7 @@ export class TaskDatabase {
    * Count tasks matching the given filters (ignores limit)
    */
   countTasks(opts: GetTasksOptions = {}): number {
-    const { status, epic_id, priority, story_status, epic_status } = opts;
+    const { status, epic_id, priority, story_status, epic_status, search } = opts;
 
     let sql = `SELECT COUNT(*) as count FROM tasks t
     LEFT JOIN stories s ON t.story_id = s.id
@@ -379,6 +396,10 @@ export class TaskDatabase {
     if (epic_status) {
       conditions.push("e.status = ?");
       params.push(epic_status);
+    }
+    if (search) {
+      conditions.push("LOWER(t.title) LIKE LOWER(?)");
+      params.push(`%${search}%`);
     }
 
     sql += ` WHERE ${conditions.join(" AND ")}`;
@@ -754,9 +775,10 @@ export class TaskDatabase {
    * Get stories with optional filtering
    */
   getStories(opts: GetStoriesOptions = {}): Story[] {
-    const { epic_id, status, limit = 50, offset = 0 } = opts;
+    const { epic_id, status, limit = 10, offset = 0, fields = "minimal", search } = opts;
 
-    let sql = "SELECT * FROM stories";
+    const fieldSet = STORY_FIELD_SETS[fields] || STORY_FIELD_SETS.minimal;
+    let sql = `SELECT ${fieldSet.join(", ")} FROM stories`;
     const conditions: string[] = [];
     const params: unknown[] = [];
 
@@ -773,6 +795,11 @@ export class TaskDatabase {
     if (status) {
       conditions.push("status = ?");
       params.push(status);
+    }
+
+    if (search) {
+      conditions.push("LOWER(title) LIKE LOWER(?)");
+      params.push(`%${search}%`);
     }
 
     if (conditions.length > 0) {
@@ -798,9 +825,10 @@ export class TaskDatabase {
    * Get epics with optional filtering
    */
   getEpics(opts: GetEpicsOptions = {}): Epic[] {
-    const { status, priority, limit = 50 } = opts;
+    const { status, priority, limit = 10, fields = "minimal", search } = opts;
 
-    let sql = "SELECT * FROM epics";
+    const fieldSet = EPIC_FIELD_SETS[fields] || EPIC_FIELD_SETS.minimal;
+    let sql = `SELECT ${fieldSet.join(", ")} FROM epics`;
     const conditions: string[] = [];
     const params: unknown[] = [];
 
@@ -812,6 +840,11 @@ export class TaskDatabase {
     if (priority) {
       conditions.push("priority = ?");
       params.push(priority);
+    }
+
+    if (search) {
+      conditions.push("LOWER(title) LIKE LOWER(?)");
+      params.push(`%${search}%`);
     }
 
     if (conditions.length > 0) {

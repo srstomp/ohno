@@ -206,6 +206,34 @@ describe("TaskDatabase", () => {
         expect(tasks.length).toBe(2);
       });
 
+      it("should respect offset", () => {
+        const page1 = db.getTasks({ limit: 2, offset: 0 });
+        const page2 = db.getTasks({ limit: 2, offset: 2 });
+
+        expect(page1.length).toBe(2);
+        expect(page2.length).toBe(1);
+        expect(page1.map((task) => task.id)).not.toContain(page2[0].id);
+      });
+
+      it("should search by title case-insensitively", () => {
+        db.createTask({ title: "SQLite migration follow-up" });
+        db.createTask({ title: "Unrelated cleanup" });
+
+        const tasks = db.getTasks({ search: "migration" });
+
+        expect(tasks.map((task) => task.title)).toEqual(["SQLite migration follow-up"]);
+      });
+
+      it("should default to a compact limit", () => {
+        for (let i = 0; i < 20; i++) {
+          db.createTask({ title: `Bulk task ${i}` });
+        }
+
+        const tasks = db.getTasks();
+
+        expect(tasks.length).toBe(10);
+      });
+
       describe("field selection", () => {
         it("should return minimal fields by default", () => {
           db.createTask({ title: "Test task", description: "A long description" });
@@ -942,6 +970,51 @@ describe("TaskDatabase", () => {
     });
   });
 
+  describe("Epic list queries", () => {
+    it("should search epics by title case-insensitively", () => {
+      db.createEpic({ title: "Migration epic", description: "Large epic description" });
+      db.createEpic({ title: "Cleanup epic", description: "Other large description" });
+
+      const epics = db.getEpics({ search: "migration" });
+
+      expect(epics.map((epic) => epic.title)).toEqual(["Migration epic"]);
+    });
+
+    it("should default to a compact limit", () => {
+      for (let i = 0; i < 15; i++) {
+        db.createEpic({ title: `Bulk epic ${i}` });
+      }
+
+      const epics = db.getEpics();
+
+      expect(epics.length).toBe(10);
+    });
+
+    describe("field selection", () => {
+      it("should return minimal fields by default", () => {
+        db.createEpic({ title: "Short epic", description: "Large epic description", priority: "P0" });
+
+        const epics = db.getEpics();
+
+        expect(epics[0].id).toBeDefined();
+        expect(epics[0].title).toBe("Short epic");
+        expect(epics[0].priority).toBe("P0");
+        expect(epics[0].status).toBe("todo");
+        expect(epics[0].description).toBeUndefined();
+        expect(epics[0].created_at).toBeUndefined();
+      });
+
+      it("should return description when standard fields are requested", () => {
+        db.createEpic({ title: "Detailed epic", description: "Useful detail" });
+
+        const epics = db.getEpics({ fields: "standard" });
+
+        expect(epics[0].description).toBe("Useful detail");
+        expect(epics[0].updated_at).toBeDefined();
+      });
+    });
+  });
+
   describe("Story CRUD Operations", () => {
     describe("createStory", () => {
       it("should create a story with minimal options", () => {
@@ -1177,6 +1250,48 @@ describe("TaskDatabase", () => {
       expect(stories.length).toBe(2);
     });
 
+    it("should search stories by title case-insensitively", () => {
+      db.createStory({ title: "Migration story", description: "Large story description" });
+      db.createStory({ title: "Cleanup story", description: "Other large description" });
+
+      const stories = db.getStories({ search: "migration" });
+
+      expect(stories.map((story) => story.title)).toEqual(["Migration story"]);
+    });
+
+    it("should default to a compact limit", () => {
+      for (let i = 0; i < 15; i++) {
+        db.createStory({ title: `Bulk story ${i}` });
+      }
+
+      const stories = db.getStories();
+
+      expect(stories.length).toBe(10);
+    });
+
+    describe("field selection", () => {
+      it("should return minimal fields by default", () => {
+        db.createStory({ title: "Short story", description: "Large story description" });
+
+        const stories = db.getStories();
+
+        expect(stories[0].id).toBeDefined();
+        expect(stories[0].title).toBe("Short story");
+        expect(stories[0].status).toBe("todo");
+        expect(stories[0].description).toBeUndefined();
+        expect(stories[0].created_at).toBeUndefined();
+      });
+
+      it("should return description when standard fields are requested", () => {
+        db.createStory({ title: "Detailed story", description: "Useful detail" });
+
+        const stories = db.getStories({ fields: "standard" });
+
+        expect(stories[0].description).toBe("Useful detail");
+        expect(stories[0].updated_at).toBeDefined();
+      });
+    });
+
     it("should respect offset option", () => {
       const story1 = db.createStory({ title: "Story 1" });
       const story2 = db.createStory({ title: "Story 2" });
@@ -1216,7 +1331,7 @@ describe("TaskDatabase", () => {
         description: "A description",
       });
 
-      const stories = db.getStories();
+      const stories = db.getStories({ fields: "full" });
       expect(stories.length).toBe(1);
 
       const story = stories[0];
@@ -1232,7 +1347,7 @@ describe("TaskDatabase", () => {
     it("should handle null epic_id in returned stories", () => {
       const storyId = db.createStory({ title: "Orphan Story" });
 
-      const stories = db.getStories();
+      const stories = db.getStories({ fields: "full" });
       expect(stories.length).toBe(1);
       expect(stories[0].epic_id).toBeNull();
     });
@@ -1240,7 +1355,7 @@ describe("TaskDatabase", () => {
     it("should handle null description in returned stories", () => {
       const storyId = db.createStory({ title: "No Description" });
 
-      const stories = db.getStories();
+      const stories = db.getStories({ fields: "full" });
       expect(stories.length).toBe(1);
       expect(stories[0].description).toBeNull();
     });
