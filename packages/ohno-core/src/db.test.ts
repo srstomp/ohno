@@ -6,7 +6,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import type { DatabaseSync } from "node:sqlite";
+import { DatabaseSync } from "node:sqlite";
 import { TaskDatabase, OhnoDatabaseLockedError } from "./db.js";
 import type { TaskStatus } from "./types.js";
 
@@ -1803,6 +1803,42 @@ describe("TaskDatabase", () => {
   });
 
   describe("Memory Decay", () => {
+    describe("hierarchy deletion", () => {
+      it("should delete archived tasks when deleting a story", () => {
+        const storyId = db.createStory({ title: "Story with archived task" });
+        const taskId = db.createTask({ title: "Archived task", story_id: storyId });
+        db.archiveTask(taskId);
+
+        expect(db.deleteStory(storyId)).toBe(true);
+        expect(db.getTask(taskId)).toBeNull();
+        expect(db.getStory(storyId)).toBeNull();
+      });
+
+      it("should delete every task in a story without a 1000 task limit", () => {
+        const storyId = db.createStory({ title: "Large story" });
+        const taskIds: string[] = [];
+
+        for (let i = 0; i < 1005; i++) {
+          taskIds.push(db.createTask({ title: `Task ${i}`, story_id: storyId }));
+        }
+
+        expect(db.deleteStory(storyId)).toBe(true);
+        expect(taskIds.every((taskId) => db.getTask(taskId) === null)).toBe(true);
+      });
+
+      it("should delete archived story tasks when deleting an epic", () => {
+        const epicId = db.createEpic({ title: "Epic with archived task" });
+        const storyId = db.createStory({ title: "Child story", epic_id: epicId });
+        const taskId = db.createTask({ title: "Archived task", story_id: storyId });
+        db.archiveTask(taskId);
+
+        expect(db.deleteEpic(epicId)).toBe(true);
+        expect(db.getTask(taskId)).toBeNull();
+        expect(db.getStory(storyId)).toBeNull();
+        expect(db.getEpic(epicId)).toBeNull();
+      });
+    });
+
     describe("compactStoryHandoffs", () => {
       it("should compact handoffs for all tasks in a completed story", () => {
         const storyId = db.createStory({ title: "Test story" });
@@ -2083,7 +2119,6 @@ describe("TaskDatabase", () => {
   describe("node:sqlite error property verification", () => {
     it("MUST: node:sqlite throws errors with .errcode=5 for SQLITE_BUSY and .code='ERR_SQLITE_ERROR'", () => {
       // Use two DatabaseSync connections to the same file with timeout:0 to get immediate SQLITE_BUSY
-      const { DatabaseSync } = require("node:sqlite") as { DatabaseSync: typeof import("node:sqlite").DatabaseSync };
       const busyDbPath = join(tempDir, "busy-verify.db");
       const conn1 = new DatabaseSync(busyDbPath, { timeout: 0 });
       const conn2 = new DatabaseSync(busyDbPath, { timeout: 0 });
@@ -2104,33 +2139,22 @@ describe("TaskDatabase", () => {
       expect((caughtError as { errcode?: number })?.errcode).toBe(5); // SQLITE_BUSY = 5
     });
 
-    it("MUST: mapSqliteError converts SQLITE_BUSY (errcode=5) to OhnoDatabaseLockedError via withTransaction", () => {
-      // This is tested indirectly: when BEGIN IMMEDIATE fails on a locked db,
-      // withTransaction should throw OhnoDatabaseLockedError.
-      // We simulate SQLITE_BUSY by having one connection hold an exclusive lock
-      // and then trying to createTask (which uses withTransaction -> BEGIN IMMEDIATE).
-      const { DatabaseSync } = require("node:sqlite") as { DatabaseSync: typeof import("node:sqlite").DatabaseSync };
+    it("MUST: withTransaction maps SQLITE_BUSY to OhnoDatabaseLockedError", async () => {
+      const lockedDb = await TaskDatabase.open(dbPath);
       const conn1 = new DatabaseSync(dbPath, { timeout: 0 });
       conn1.exec("BEGIN EXCLUSIVE");
       let caught: unknown;
       try {
-        // db has timeout: 5000 but we need immediate failure for the test.
-        // Use a fresh db connection with timeout:0 to the same file.
-        const freshDb = new DatabaseSync(dbPath, { timeout: 0 });
-        try {
-          freshDb.exec("BEGIN IMMEDIATE");
-        } catch (e) {
-          caught = e;
-        } finally {
-          freshDb.close();
-        }
+        lockedDb.deleteTask("task-locked");
+      } catch (e) {
+        caught = e;
       } finally {
         conn1.exec("ROLLBACK");
         conn1.close();
+        lockedDb.close();
       }
-      // The raw error has errcode=5 (SQLITE_BUSY)
-      expect(caught).toBeDefined();
-      expect((caught as { errcode?: number })?.errcode).toBe(5);
+      expect(caught).toBeInstanceOf(OhnoDatabaseLockedError);
+      expect((caught as OhnoDatabaseLockedError).sqliteCode).toBe("SQLITE_BUSY");
     });
   });
 });

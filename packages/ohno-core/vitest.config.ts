@@ -4,7 +4,7 @@ import { defineConfig, type Plugin } from "vitest/config";
 // vite-node's normalizeModuleId() strips the "node:" prefix, so "node:sqlite"
 // becomes "sqlite", which Vite can't find as a file. This plugin intercepts
 // the stripped id and provides a virtual module that loads the real built-in
-// via a dynamic import (which bypasses vite-node's normalisation).
+// via createRequire(...), which bypasses vite-node's normalisation.
 const nodeSqlitePlugin: Plugin = {
   name: "node-sqlite-external",
   enforce: "pre",
