@@ -42,7 +42,14 @@ export function getGitContext(cwd: string): GitContext | null {
 
 export function resolveCanonicalProjectRoot(ctx: GitContext): string | null {
   if (ctx.superprojectRoot !== null) return ctx.topLevel;
-  return path.dirname(ctx.commonDir);
+  // Normal repos and linked worktrees: commonDir is `<root>/.git` so
+  // dirname gives the canonical project root. External gitdirs (created via
+  // `git init --separate-git-dir=...`) have commonDir pointing at the gitdir
+  // itself, so dirname would give the gitdir's parent — fall back to topLevel.
+  if (path.basename(ctx.commonDir) === '.git') {
+    return path.dirname(ctx.commonDir);
+  }
+  return ctx.topLevel;
 }
 
 /**
