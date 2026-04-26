@@ -121,23 +121,28 @@ export function getTimestamp(): string {
  * Similar to how git finds .git
  */
 export function findOhnoDir(startDir?: string): string | null {
-  let currentDir = startDir ?? process.cwd();
+  const cwd = startDir ?? process.cwd();
+  const gitCtx = getGitContext(cwd);
+  if (gitCtx) {
+    const projectRoot = resolveCanonicalProjectRoot(gitCtx);
+    if (projectRoot) {
+      const candidate = path.join(projectRoot, '.ohno');
+      if (fs.existsSync(candidate) && fs.statSync(candidate).isDirectory()) {
+        return fs.realpathSync(candidate);
+      }
+      return null;  // Inside working tree but no canonical .ohno; do not fall through to worktree-local
+    }
+  }
+  return walkUpForOhno(cwd);
+}
 
-  // Walk up the directory tree
+function walkUpForOhno(startDir: string): string | null {
+  let currentDir = startDir;
   while (true) {
-    const ohnoPath = path.join(currentDir, ".ohno");
-
-    if (fs.existsSync(ohnoPath) && fs.statSync(ohnoPath).isDirectory()) {
-      return ohnoPath;
-    }
-
+    const ohnoPath = path.join(currentDir, '.ohno');
+    if (fs.existsSync(ohnoPath) && fs.statSync(ohnoPath).isDirectory()) return ohnoPath;
     const parentDir = path.dirname(currentDir);
-
-    // Reached root
-    if (parentDir === currentDir) {
-      return null;
-    }
-
+    if (parentDir === currentDir) return null;
     currentDir = parentDir;
   }
 }
