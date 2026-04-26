@@ -67,7 +67,7 @@ import {
 
 // SQLite numeric error codes (node:sqlite uses .errcode, not .code, for the SQLite-specific code)
 const SQLITE_BUSY = 5;
-const SQLITE_BUSY_SNAPSHOT = 261; // SQLITE_BUSY | (1 << 8)
+const SQLITE_BUSY_SNAPSHOT = 517; // SQLITE_BUSY | (2 << 8)
 const SQLITE_LOCKED = 6;
 
 /**
@@ -113,6 +113,10 @@ function mapSqliteError(e: unknown): never {
     throw new Error(`${e.message} [errcode=${errcode}]`, { cause: e });
   }
   throw e;
+}
+
+function isDuplicateColumnError(e: unknown): boolean {
+  return e instanceof Error && e.message.toLowerCase().includes("duplicate column name");
 }
 
 export class TaskDatabase {
@@ -214,8 +218,11 @@ export class TaskDatabase {
     for (const [colName, colType] of EXTENDED_TASK_COLUMNS) {
       try {
         this.db.prepare(`ALTER TABLE tasks ADD COLUMN ${colName} ${colType}`).run();
-      } catch {
-        // Column already exists
+      } catch (e) {
+        if (isDuplicateColumnError(e)) {
+          continue;
+        }
+        mapSqliteError(e);
       }
     }
 

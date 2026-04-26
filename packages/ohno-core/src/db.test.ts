@@ -42,6 +42,15 @@ describe("TaskDatabase", () => {
       expect(db2).toBeDefined();
       db2.close();
     });
+
+    it("should not swallow schema migration errors other than duplicate columns", async () => {
+      const malformedDbPath = join(tempDir, "malformed-schema.db");
+      const malformedDb = new DatabaseSync(malformedDbPath);
+      malformedDb.exec("CREATE VIEW tasks AS SELECT 'task-1' AS id");
+      malformedDb.close();
+
+      await expect(TaskDatabase.open(malformedDbPath)).rejects.toThrow("Cannot add a column to a view");
+    });
   });
 
   describe("Task CRUD Operations", () => {
@@ -2170,6 +2179,33 @@ describe("TaskDatabase", () => {
       }
       expect(caught).toBeInstanceOf(OhnoDatabaseLockedError);
       expect((caught as OhnoDatabaseLockedError).sqliteCode).toBe("SQLITE_BUSY");
+    });
+
+    it("MUST: withTransaction maps SQLITE_BUSY_SNAPSHOT errcode 517 to OhnoDatabaseLockedError", () => {
+      const dbInstance = db as unknown as { db: DatabaseSync };
+      const originalDb = dbInstance.db;
+      dbInstance.db = {
+        exec(sql: string) {
+          if (sql === "BEGIN IMMEDIATE") {
+            const err = new Error("database snapshot is stale") as Error & { code: string; errcode: number };
+            err.code = "ERR_SQLITE_ERROR";
+            err.errcode = 517;
+            throw err;
+          }
+        },
+      } as DatabaseSync;
+
+      let caught: unknown;
+      try {
+        db.deleteTask("task-locked");
+      } catch (e) {
+        caught = e;
+      } finally {
+        dbInstance.db = originalDb;
+      }
+
+      expect(caught).toBeInstanceOf(OhnoDatabaseLockedError);
+      expect((caught as OhnoDatabaseLockedError).sqliteCode).toBe("SQLITE_BUSY_SNAPSHOT");
     });
 
     it("MUST: direct write methods map SQLITE_BUSY to OhnoDatabaseLockedError", async () => {
