@@ -65,6 +65,56 @@ import {
   FIELD_SETS,
 } from "./schema.js";
 
+// SQLite numeric error codes (node:sqlite uses .errcode, not .code, for the SQLite-specific code)
+const SQLITE_BUSY = 5;
+const SQLITE_BUSY_SNAPSHOT = 261; // SQLITE_BUSY | (1 << 8)
+const SQLITE_LOCKED = 6;
+
+/**
+ * Typed error for database lock contention that is recoverable by the user.
+ * Thrown when node:sqlite reports SQLITE_BUSY or SQLITE_BUSY_SNAPSHOT.
+ */
+export class OhnoDatabaseLockedError extends Error {
+  constructor(public readonly sqliteCode: string, message: string) {
+    super(message);
+    this.name = 'OhnoDatabaseLockedError';
+  }
+}
+
+/**
+ * Map a node:sqlite error to a typed application error.
+ * node:sqlite errors have .code = 'ERR_SQLITE_ERROR' and .errcode = <numeric SQLite code>.
+ * Always throws; callers use it in catch blocks: try { ... } catch (e) { mapSqliteError(e); }
+ */
+function mapSqliteError(e: unknown): never {
+  const errcode = (e as { errcode?: number })?.errcode;
+
+  if (errcode === SQLITE_BUSY) {
+    throw new OhnoDatabaseLockedError(
+      'SQLITE_BUSY',
+      "Database is locked by another ohno process; retry timed out after 5s. Try again, or check for stale ohno-mcp processes with 'ps aux | grep ohno-mcp'."
+    );
+  }
+  if (errcode === SQLITE_BUSY_SNAPSHOT) {
+    throw new OhnoDatabaseLockedError(
+      'SQLITE_BUSY_SNAPSHOT',
+      'Database changed during transaction; retry'
+    );
+  }
+  if (errcode === SQLITE_LOCKED) {
+    // Programmer-level bug, NOT an OhnoDatabaseLockedError
+    const err = new Error('Internal lock conflict (SQLITE_LOCKED) — please report this as a bug.');
+    (err as Error & { sqliteCode?: string }).sqliteCode = 'SQLITE_LOCKED';
+    throw err;
+  }
+  // Pass-through: re-throw with errcode preserved in message if not already there
+  const isNodeSqliteError = (e as { code?: string })?.code === 'ERR_SQLITE_ERROR';
+  if (isNodeSqliteError && errcode !== undefined && e instanceof Error && !e.message.includes(String(errcode))) {
+    throw new Error(`${e.message} [errcode=${errcode}]`);
+  }
+  throw e;
+}
+
 export class TaskDatabase {
   private constructor(private db: DatabaseSync, public readonly dbPath: string) {}
 
@@ -72,9 +122,15 @@ export class TaskDatabase {
    * Execute fn inside a BEGIN IMMEDIATE transaction.
    * Acquires the write lock at start, avoiding mid-transaction upgrade races.
    * If ROLLBACK itself throws, the original error propagates (not the rollback error).
+   * SQLite lock errors (BUSY, BUSY_SNAPSHOT) are mapped to OhnoDatabaseLockedError.
    */
   private withTransaction<T>(fn: () => T): T {
-    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      this.db.exec('BEGIN IMMEDIATE');
+    } catch (e) {
+      mapSqliteError(e);
+    }
+
     try {
       const result = fn();
       this.db.exec('COMMIT');
@@ -85,6 +141,10 @@ export class TaskDatabase {
       } catch {
         // Swallow rollback errors so the original cause propagates.
       }
+      // Map SQLite errors before propagating; non-SQLite errors pass through
+      if ((e as { code?: string })?.code === 'ERR_SQLITE_ERROR') {
+        mapSqliteError(e);
+      }
       throw e;
     }
   }
@@ -94,32 +154,43 @@ export class TaskDatabase {
    */
   static async open(dbPath: string): Promise<TaskDatabase> {
     fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-    const db = new DatabaseSync(dbPath, { timeout: 5000 });
+    let db: DatabaseSync | undefined;
+    try {
+      db = new DatabaseSync(dbPath, { timeout: 5000 });
 
-    // Set and verify journal mode. PRAGMA can silently fail (e.g., if the file
-    // is in use by another process holding it in WAL); we assert the result.
-    const journalRows = db.prepare('PRAGMA journal_mode = DELETE').all() as Array<{ journal_mode: string }>;
-    const actualMode = journalRows[0]?.journal_mode;
-    if (actualMode !== 'delete') {
-      db.close();
-      throw new Error(
-        `Failed to set journal_mode = DELETE on ${dbPath}. ` +
-        `SQLite returned mode '${actualMode}'. ` +
-        `This usually means another process has the database open in a different journal mode. ` +
-        `Close other ohno processes and retry.`
-      );
-    }
+      // Set and verify journal mode. PRAGMA can silently fail (e.g., if the file
+      // is in use by another process holding it in WAL); we assert the result.
+      const journalRows = db.prepare('PRAGMA journal_mode = DELETE').all() as Array<{ journal_mode: string }>;
+      const actualMode = journalRows[0]?.journal_mode;
+      if (actualMode !== 'delete') {
+        db.close();
+        throw new Error(
+          `Failed to set journal_mode = DELETE on ${dbPath}. ` +
+          `SQLite returned mode '${actualMode}'. ` +
+          `This usually means another process has the database open in a different journal mode. ` +
+          `Close other ohno processes and retry.`
+        );
+      }
 
-    db.exec('PRAGMA foreign_keys = ON');
-    db.exec('PRAGMA synchronous = NORMAL');
+      db.exec('PRAGMA foreign_keys = ON');
+      db.exec('PRAGMA synchronous = NORMAL');
 
-    const checkRows = db.prepare('PRAGMA quick_check').all() as Array<{ quick_check: string }>;
-    if (checkRows[0]?.quick_check !== 'ok') {
-      db.close();
-      throw new Error(
-        `Database integrity check failed on ${dbPath}: ${checkRows[0]?.quick_check}. ` +
-        `Run 'sqlite3 ${dbPath} ".recover"' to attempt recovery.`
-      );
+      const checkRows = db.prepare('PRAGMA quick_check').all() as Array<{ quick_check: string }>;
+      if (checkRows[0]?.quick_check !== 'ok') {
+        db.close();
+        throw new Error(
+          `Database integrity check failed on ${dbPath}: ${checkRows[0]?.quick_check}. ` +
+          `Run 'sqlite3 ${dbPath} ".recover"' to attempt recovery.`
+        );
+      }
+    } catch (e) {
+      // Close db if it was opened before the error occurred
+      try { db?.close(); } catch { /* ignore close errors */ }
+      // Only remap SQLite-coded errors; let our own Error messages pass through unchanged
+      if ((e as { code?: string })?.code === 'ERR_SQLITE_ERROR') {
+        mapSqliteError(e);
+      }
+      throw e;
     }
 
     const instance = new TaskDatabase(db, dbPath);
@@ -611,14 +682,21 @@ export class TaskDatabase {
       VALUES (?, ?, ?, ?, 'todo', ?, ?)
     `;
 
-    this.db.prepare(sql).run(
-      storyId,
-      opts.epic_id ?? null,
-      opts.title,
-      opts.description ?? null,
-      timestamp,
-      timestamp,
-    );
+    try {
+      this.db.prepare(sql).run(
+        storyId,
+        opts.epic_id ?? null,
+        opts.title,
+        opts.description ?? null,
+        timestamp,
+        timestamp,
+      );
+    } catch (e) {
+      if ((e as { code?: string })?.code === 'ERR_SQLITE_ERROR') {
+        mapSqliteError(e);
+      }
+      throw e;
+    }
 
     return storyId;
   }
@@ -660,9 +738,15 @@ export class TaskDatabase {
     params.push(storyId);
 
     const sql = `UPDATE stories SET ${setClauses.join(", ")} WHERE id = ?`;
-    const result = this.db.prepare(sql).run(...(params as never[]));
-
-    return Number(result.changes) > 0;
+    try {
+      const result = this.db.prepare(sql).run(...(params as never[]));
+      return Number(result.changes) > 0;
+    } catch (e) {
+      if ((e as { code?: string })?.code === 'ERR_SQLITE_ERROR') {
+        mapSqliteError(e);
+      }
+      throw e;
+    }
   }
 
   /**
@@ -759,15 +843,22 @@ export class TaskDatabase {
       VALUES (?, ?, ?, ?, ?, 'todo', ?, ?)
     `;
 
-    this.db.prepare(sql).run(
-      epicId,
-      opts.project_id ?? null,
-      opts.title,
-      opts.description ?? null,
-      opts.priority ?? "P2",
-      timestamp,
-      timestamp,
-    );
+    try {
+      this.db.prepare(sql).run(
+        epicId,
+        opts.project_id ?? null,
+        opts.title,
+        opts.description ?? null,
+        opts.priority ?? "P2",
+        timestamp,
+        timestamp,
+      );
+    } catch (e) {
+      if ((e as { code?: string })?.code === 'ERR_SQLITE_ERROR') {
+        mapSqliteError(e);
+      }
+      throw e;
+    }
 
     return epicId;
   }
@@ -801,9 +892,15 @@ export class TaskDatabase {
     params.push(epicId);
 
     const sql = `UPDATE epics SET ${setClauses.join(", ")} WHERE id = ?`;
-    const result = this.db.prepare(sql).run(...(params as never[]));
-
-    return Number(result.changes) > 0;
+    try {
+      const result = this.db.prepare(sql).run(...(params as never[]));
+      return Number(result.changes) > 0;
+    } catch (e) {
+      if ((e as { code?: string })?.code === 'ERR_SQLITE_ERROR') {
+        mapSqliteError(e);
+      }
+      throw e;
+    }
   }
 
   /**

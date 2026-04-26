@@ -6,7 +6,8 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { TaskDatabase } from "@stevestomp/ohno-core";
+import { TaskDatabase, OhnoDatabaseLockedError } from "@stevestomp/ohno-core";
+import type { DatabaseSync } from "node:sqlite";
 import { ZodError } from "zod";
 import {
   handleTool,
@@ -1335,11 +1336,10 @@ describe("MCP Server", () => {
 
       it("should filter by epic_id", async () => {
         // Create an epic
-        const dbInstance = db as unknown as { db: { run: (sql: string, params?: unknown[]) => void } };
-        dbInstance.db.run(
-          "INSERT INTO epics (id, title, priority) VALUES (?, ?, ?)",
-          ["epic-1", "Epic 1", "P0"]
-        );
+        const dbInstance = db as unknown as { db: DatabaseSync };
+        dbInstance.db.prepare(
+          "INSERT INTO epics (id, title, priority) VALUES (?, ?, ?)"
+        ).run("epic-1", "Epic 1", "P0");
 
         // Create stories with different epics
         db.createStory({ title: "Story in epic 1", epic_id: "epic-1" });
@@ -1389,11 +1389,10 @@ describe("MCP Server", () => {
       });
 
       it("should combine filters", async () => {
-        const dbInstance = db as unknown as { db: { run: (sql: string, params?: unknown[]) => void } };
-        dbInstance.db.run(
-          "INSERT INTO epics (id, title, priority) VALUES (?, ?, ?)",
-          ["epic-1", "Epic 1", "P0"]
-        );
+        const dbInstance = db as unknown as { db: DatabaseSync };
+        dbInstance.db.prepare(
+          "INSERT INTO epics (id, title, priority) VALUES (?, ?, ?)"
+        ).run("epic-1", "Epic 1", "P0");
 
         const story1 = db.createStory({ title: "Story 1", epic_id: "epic-1" });
         const story2 = db.createStory({ title: "Story 2", epic_id: "epic-1" });
@@ -1469,11 +1468,10 @@ describe("MCP Server", () => {
       });
 
       it("should update story epic_id", async () => {
-        const dbInstance = db as unknown as { db: { run: (sql: string, params?: unknown[]) => void } };
-        dbInstance.db.run(
-          "INSERT INTO epics (id, title, priority) VALUES (?, ?, ?)",
-          ["epic-1", "Epic 1", "P0"]
-        );
+        const dbInstance = db as unknown as { db: DatabaseSync };
+        dbInstance.db.prepare(
+          "INSERT INTO epics (id, title, priority) VALUES (?, ?, ?)"
+        ).run("epic-1", "Epic 1", "P0");
 
         const storyId = db.createStory({ title: "Test story" });
         const result = await handleTool("update_story", {
@@ -1487,11 +1485,10 @@ describe("MCP Server", () => {
       });
 
       it("should unassign story from epic with null", async () => {
-        const dbInstance = db as unknown as { db: { run: (sql: string, params?: unknown[]) => void } };
-        dbInstance.db.run(
-          "INSERT INTO epics (id, title, priority) VALUES (?, ?, ?)",
-          ["epic-1", "Epic 1", "P0"]
-        );
+        const dbInstance = db as unknown as { db: DatabaseSync };
+        dbInstance.db.prepare(
+          "INSERT INTO epics (id, title, priority) VALUES (?, ?, ?)"
+        ).run("epic-1", "Epic 1", "P0");
 
         const storyId = db.createStory({ title: "Test story", epic_id: "epic-1" });
         const result = await handleTool("update_story", {
@@ -1706,15 +1703,13 @@ describe("MCP Server", () => {
 
       it("should return boundaries when completing task with story", async () => {
         // Set up hierarchy
-        const dbInstance = db as unknown as { db: { run: (sql: string, params?: unknown[]) => void } };
-        dbInstance.db.run(
-          "INSERT INTO epics (id, title, priority) VALUES (?, ?, ?)",
-          ["epic-1", "Epic 1", "P0"]
-        );
-        dbInstance.db.run(
-          "INSERT INTO stories (id, epic_id, title) VALUES (?, ?, ?)",
-          ["story-1", "epic-1", "Story 1"]
-        );
+        const dbInstance = db as unknown as { db: DatabaseSync };
+        dbInstance.db.prepare(
+          "INSERT INTO epics (id, title, priority) VALUES (?, ?, ?)"
+        ).run("epic-1", "Epic 1", "P0");
+        dbInstance.db.prepare(
+          "INSERT INTO stories (id, epic_id, title) VALUES (?, ?, ?)"
+        ).run("story-1", "epic-1", "Story 1");
 
         const taskId = db.createTask({ title: "Test", story_id: "story-1" });
         const result = await handleTool("update_task_status", {
@@ -2319,6 +2314,53 @@ describe("MCP Server", () => {
 
     it("should throw ZodError for missing required arguments", async () => {
       await expect(handleTool("get_task", {})).rejects.toThrow(ZodError);
+    });
+  });
+
+  describe("OhnoDatabaseLockedError handling in handleTool", () => {
+    it("MUST: handleTool returns structured error response when OhnoDatabaseLockedError is thrown", async () => {
+      // Simulate OhnoDatabaseLockedError being thrown inside handleTool
+      // by closing the db and trying to use it via a mock db that throws
+      const lockedError = new OhnoDatabaseLockedError(
+        "SQLITE_BUSY",
+        "Database is locked by another ohno process; retry timed out after 5s. Try again, or check for stale ohno-mcp processes with 'ps aux | grep ohno-mcp'."
+      );
+
+      // Create a mock db that throws OhnoDatabaseLockedError on getProjectStatus
+      const mockDb = {
+        getProjectStatus: () => { throw lockedError; },
+      } as unknown as TaskDatabase;
+      setDb(mockDb);
+
+      const result = await handleTool("get_project_status", {});
+      expect(result).toEqual({
+        success: false,
+        error: lockedError.message,
+        errorCode: "SQLITE_BUSY",
+      });
+    });
+
+    it("MUST: handleTool does not catch non-OhnoDatabaseLockedError errors (lets them propagate)", async () => {
+      const regularError = new Error("Some other error");
+      const mockDb = {
+        getProjectStatus: () => { throw regularError; },
+      } as unknown as TaskDatabase;
+      setDb(mockDb);
+
+      await expect(handleTool("get_project_status", {})).rejects.toThrow("Some other error");
+    });
+
+    it("MUST: structured error response has success:false, error message, and errorCode fields", async () => {
+      const lockedError = new OhnoDatabaseLockedError("SQLITE_BUSY_SNAPSHOT", "Database changed during transaction; retry");
+      const mockDb = {
+        getProjectStatus: () => { throw lockedError; },
+      } as unknown as TaskDatabase;
+      setDb(mockDb);
+
+      const result = await handleTool("get_project_status", {}) as Record<string, unknown>;
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("Database changed during transaction; retry");
+      expect(result.errorCode).toBe("SQLITE_BUSY_SNAPSHOT");
     });
   });
 });
