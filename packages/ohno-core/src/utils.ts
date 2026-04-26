@@ -3,8 +3,47 @@
  */
 
 import crypto from "node:crypto";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+
+export interface GitContext {
+  insideWorkTree: boolean;
+  commonDir: string;
+  topLevel: string;
+  superprojectRoot: string | null;
+}
+
+export function tryGit(args: string[], cwd: string): string | null {
+  try {
+    return execFileSync('git', args, {
+      cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+  } catch {
+    return null;
+  }
+}
+
+export function getGitContext(cwd: string): GitContext | null {
+  const insideWorkTreeStr = tryGit(['rev-parse', '--is-inside-work-tree'], cwd);
+  if (insideWorkTreeStr !== 'true') return null;
+  const commonDir = tryGit(['rev-parse', '--git-common-dir'], cwd);
+  const topLevel  = tryGit(['rev-parse', '--show-toplevel'], cwd);
+  if (!commonDir || !topLevel) return null;
+  const superRaw = tryGit(['rev-parse', '--show-superproject-working-tree'], cwd);
+  const superprojectRoot = superRaw && superRaw.length > 0 ? superRaw : null;
+  return {
+    insideWorkTree: true,
+    commonDir: path.isAbsolute(commonDir) ? commonDir : path.resolve(cwd, commonDir),
+    topLevel,
+    superprojectRoot,
+  };
+}
+
+export function resolveCanonicalProjectRoot(ctx: GitContext): string | null {
+  if (ctx.superprojectRoot !== null) return ctx.topLevel;
+  return path.dirname(ctx.commonDir);
+}
 
 /**
  * Generate a content-based task ID
