@@ -1837,6 +1837,21 @@ describe("TaskDatabase", () => {
         expect(db.getStory(storyId)).toBeNull();
         expect(db.getEpic(epicId)).toBeNull();
       });
+
+      it("should delete every story in an epic without a 50 story limit", () => {
+        const epicId = db.createEpic({ title: "Large epic" });
+        const storyIds: string[] = [];
+
+        for (let i = 0; i < 55; i++) {
+          const storyId = db.createStory({ title: `Story ${i}`, epic_id: epicId });
+          storyIds.push(storyId);
+          db.createTask({ title: `Task ${i}`, story_id: storyId });
+        }
+
+        expect(db.deleteEpic(epicId)).toBe(true);
+        expect(storyIds.every((storyId) => db.getStory(storyId) === null)).toBe(true);
+        expect(db.getTasks({ limit: 100 }).filter((task) => storyIds.includes(task.story_id ?? "")).length).toBe(0);
+      });
     });
 
     describe("compactStoryHandoffs", () => {
@@ -2155,6 +2170,33 @@ describe("TaskDatabase", () => {
       }
       expect(caught).toBeInstanceOf(OhnoDatabaseLockedError);
       expect((caught as OhnoDatabaseLockedError).sqliteCode).toBe("SQLITE_BUSY");
+    });
+
+    it("MUST: direct write methods map SQLITE_BUSY to OhnoDatabaseLockedError", async () => {
+      const lockedDb = await TaskDatabase.open(dbPath);
+      const conn1 = new DatabaseSync(dbPath, { timeout: 0 });
+
+      for (const write of [
+        () => lockedDb.addTaskActivity("task-locked", "note", "Blocked activity"),
+        () => lockedDb.addTaskFailure("task-locked", "implementation", "Blocked failure", 1),
+        () => lockedDb.setTaskHandoff("task-locked", "PASS", "Blocked handoff"),
+      ]) {
+        conn1.exec("BEGIN EXCLUSIVE");
+        let caught: unknown;
+        try {
+          write();
+        } catch (e) {
+          caught = e;
+        } finally {
+          conn1.exec("ROLLBACK");
+        }
+
+        expect(caught).toBeInstanceOf(OhnoDatabaseLockedError);
+        expect((caught as OhnoDatabaseLockedError).sqliteCode).toBe("SQLITE_BUSY");
+      }
+
+      conn1.close();
+      lockedDb.close();
     });
   });
 });

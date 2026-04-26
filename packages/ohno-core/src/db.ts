@@ -110,7 +110,7 @@ function mapSqliteError(e: unknown): never {
   // Pass-through: re-throw with errcode preserved in message if not already there
   const isNodeSqliteError = (e as { code?: string })?.code === 'ERR_SQLITE_ERROR';
   if (isNodeSqliteError && errcode !== undefined && e instanceof Error && !e.message.includes(String(errcode))) {
-    throw new Error(`${e.message} [errcode=${errcode}]`);
+    throw new Error(`${e.message} [errcode=${errcode}]`, { cause: e });
   }
   throw e;
 }
@@ -1253,6 +1253,10 @@ export class TaskDatabase {
     return rows.map((row) => row.id);
   }
 
+  private getStoriesByEpic(epicId: string): Array<{ id: string }> {
+    return this.db.prepare("SELECT id FROM stories WHERE epic_id = ? ORDER BY updated_at DESC, created_at DESC").all(epicId) as Array<{ id: string }>;
+  }
+
   /**
    * Delete an epic (hard delete)
    * Also deletes all stories and tasks associated with the epic
@@ -1264,7 +1268,7 @@ export class TaskDatabase {
     }
 
     return this.withTransaction(() => {
-      const stories = this.getStories({ epic_id: epicId });
+      const stories = this.getStoriesByEpic(epicId);
 
       // Delete all tasks in each story
       for (const story of stories) {
@@ -1399,18 +1403,22 @@ export class TaskDatabase {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
-    const result = this.db.prepare(sql).run(
-      actId,
-      taskId,
-      activityType,
-      description,
-      oldValue ?? null,
-      newValue ?? null,
-      actor ?? null,
-      timestamp,
-    );
+    try {
+      const result = this.db.prepare(sql).run(
+        actId,
+        taskId,
+        activityType,
+        description,
+        oldValue ?? null,
+        newValue ?? null,
+        actor ?? null,
+        timestamp,
+      );
 
-    return Number(result.changes) > 0;
+      return Number(result.changes) > 0;
+    } catch (e) {
+      mapSqliteError(e);
+    }
   }
 
   /**
@@ -1479,14 +1487,18 @@ export class TaskDatabase {
       VALUES (?, ?, ?, ?, ?, ?)
     `;
 
-    this.db.prepare(sql).run(
-      failureId,
-      taskId,
-      failureType,
-      failureReason,
-      attempt ?? null,
-      timestamp,
-    );
+    try {
+      this.db.prepare(sql).run(
+        failureId,
+        taskId,
+        failureType,
+        failureReason,
+        attempt ?? null,
+        timestamp,
+      );
+    } catch (e) {
+      mapSqliteError(e);
+    }
 
     return failureId;
   }
@@ -1523,15 +1535,19 @@ export class TaskDatabase {
       INSERT OR REPLACE INTO task_handoffs (task_id, status, summary, files_changed, full_details, created_at)
       VALUES (?, ?, ?, ?, ?, ?)
     `;
-    const result = this.db.prepare(sql).run(
-      taskId,
-      status,
-      summary,
-      filesChanged ? JSON.stringify(filesChanged) : null,
-      fullDetails ?? null,
-      timestamp,
-    );
-    return Number(result.changes) > 0;
+    try {
+      const result = this.db.prepare(sql).run(
+        taskId,
+        status,
+        summary,
+        filesChanged ? JSON.stringify(filesChanged) : null,
+        fullDetails ?? null,
+        timestamp,
+      );
+      return Number(result.changes) > 0;
+    } catch (e) {
+      mapSqliteError(e);
+    }
   }
 
   /**
