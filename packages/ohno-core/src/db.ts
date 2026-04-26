@@ -141,11 +141,8 @@ export class TaskDatabase {
       } catch {
         // Swallow rollback errors so the original cause propagates.
       }
-      // Map SQLite errors before propagating; non-SQLite errors pass through
-      if ((e as { code?: string })?.code === 'ERR_SQLITE_ERROR') {
-        mapSqliteError(e);
-      }
-      throw e;
+      // Map SQLite errors before propagating; non-SQLite errors pass through.
+      mapSqliteError(e);
     }
   }
 
@@ -186,11 +183,8 @@ export class TaskDatabase {
     } catch (e) {
       // Close db if it was opened before the error occurred
       try { db?.close(); } catch { /* ignore close errors */ }
-      // Only remap SQLite-coded errors; let our own Error messages pass through unchanged
-      if ((e as { code?: string })?.code === 'ERR_SQLITE_ERROR') {
-        mapSqliteError(e);
-      }
-      throw e;
+      // Remap SQLite-coded errors; let our own Error messages pass through unchanged.
+      mapSqliteError(e);
     }
 
     const instance = new TaskDatabase(db, dbPath);
@@ -1254,6 +1248,11 @@ export class TaskDatabase {
     return this.withTransaction(() => this._deleteTaskImpl(taskId));
   }
 
+  private getTaskIdsByStory(storyId: string): string[] {
+    const rows = this.db.prepare("SELECT id FROM tasks WHERE story_id = ?").all(storyId) as Array<{ id: string }>;
+    return rows.map((row) => row.id);
+  }
+
   /**
    * Delete an epic (hard delete)
    * Also deletes all stories and tasks associated with the epic
@@ -1264,18 +1263,14 @@ export class TaskDatabase {
       return false;
     }
 
-    // Get all stories in this epic before entering the transaction
-    const stories = this.getStories({ epic_id: epicId });
-
     return this.withTransaction(() => {
+      const stories = this.getStories({ epic_id: epicId });
+
       // Delete all tasks in each story
       for (const story of stories) {
-        const tasks = this.getTasks({ limit: 1000 });
-        for (const task of tasks) {
-          if (task.story_id === story.id) {
-            // Use unwrapped impl to avoid nested BEGIN IMMEDIATE
-            this._deleteTaskImpl(task.id);
-          }
+        for (const taskId of this.getTaskIdsByStory(story.id)) {
+          // Use unwrapped impl to avoid nested BEGIN IMMEDIATE
+          this._deleteTaskImpl(taskId);
         }
       }
 
@@ -1301,16 +1296,11 @@ export class TaskDatabase {
       return false;
     }
 
-    // Get tasks before entering the transaction
-    const tasks = this.getTasks({ limit: 1000 });
-
     return this.withTransaction(() => {
       // Delete all tasks in this story
-      for (const task of tasks) {
-        if (task.story_id === storyId) {
-          // Use unwrapped impl to avoid nested BEGIN IMMEDIATE
-          this._deleteTaskImpl(task.id);
-        }
+      for (const taskId of this.getTaskIdsByStory(storyId)) {
+        // Use unwrapped impl to avoid nested BEGIN IMMEDIATE
+        this._deleteTaskImpl(taskId);
       }
 
       // Delete the story

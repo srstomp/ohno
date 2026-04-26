@@ -51,9 +51,10 @@ export interface KanbanData {
  */
 export async function exportDatabase(dbPath: string): Promise<KanbanData> {
   const db = new DatabaseSync(dbPath, { readOnly: true });
-  db.exec("PRAGMA query_only = ON");
 
   try {
+    db.exec("PRAGMA query_only = ON");
+
     const data: KanbanData = {
       synced_at: new Date().toISOString(),
       version: pkg.version,
