@@ -76,6 +76,7 @@ describe('getGitContext', () => {
     const ctx = getGitContext(tmpDir);
     expect(ctx).not.toBeNull();
     expect(ctx!.insideWorkTree).toBe(true);
+    expect(path.isAbsolute(ctx!.gitDir)).toBe(true);
     expect(path.isAbsolute(ctx!.commonDir)).toBe(true);
     expect(ctx!.superprojectRoot).toBeNull();
   });
@@ -85,18 +86,38 @@ describe('resolveCanonicalProjectRoot', () => {
   it('returns topLevel for a submodule', () => {
     expect(resolveCanonicalProjectRoot({
       insideWorkTree: true,
+      gitDir: '/parent/.git/modules/sub',
       commonDir: '/parent/.git/modules/sub',
       topLevel: '/parent/sub',
       superprojectRoot: '/parent',
     })).toBe('/parent/sub');
   });
-  it('returns dirname(commonDir) for a normal repo / linked worktree', () => {
+  it('returns dirname(commonDir) for a linked worktree (gitDir != commonDir)', () => {
     expect(resolveCanonicalProjectRoot({
       insideWorkTree: true,
+      gitDir: '/repo/.git/worktrees/feat',
       commonDir: '/repo/.git',
       topLevel: '/repo/.worktrees/feat',
       superprojectRoot: null,
     })).toBe('/repo');
+  });
+  it('returns topLevel for a normal repo (gitDir == commonDir)', () => {
+    expect(resolveCanonicalProjectRoot({
+      insideWorkTree: true,
+      gitDir: '/repo/.git',
+      commonDir: '/repo/.git',
+      topLevel: '/repo',
+      superprojectRoot: null,
+    })).toBe('/repo');
+  });
+  it('returns topLevel for external gitdir literally named .git (gitDir == commonDir)', () => {
+    expect(resolveCanonicalProjectRoot({
+      insideWorkTree: true,
+      gitDir: '/path/to/.git',
+      commonDir: '/path/to/.git',
+      topLevel: '/path/to/wt',
+      superprojectRoot: null,
+    })).toBe('/path/to/wt');
   });
 });
 
